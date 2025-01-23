@@ -16,8 +16,6 @@ interface types {
 
     @unstable(feature = tls)
     resource client-connection {
-        @unstable(feature = tls)
-        close-notify: func() -> option<result>;
     }
 
     @unstable(feature = tls)
