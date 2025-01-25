@@ -1,3 +1,9 @@
+# Transport Layer Security (TLS/SSL)
+
+> For thread-local storage, which also abbreviates to TLS, see the [Shared-Everything Threads Proposal](https://github.com/WebAssembly/shared-everything-threads).
+
+---
+
 # [Example WASI proposal]
 
 This template can be used to start a new proposal, which can then be proposed in the WASI Subgroup meetings.
