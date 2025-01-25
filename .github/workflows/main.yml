@@ -13,5 +13,6 @@ jobs:
     - uses: actions/checkout@v4
     - uses: WebAssembly/wit-abi-up-to-date@v22
       with:
-        wit-bindgen: '0.33.0'
-        wasm-tools: '1.218.0'
+        features: 'tls'
+        wit-bindgen: '0.38.0'
+        wasm-tools: '1.224.0'
