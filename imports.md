@@ -5,7 +5,7 @@
 <li>interface <a href="#wasi_io_error_0_2_3"><code>wasi:io/error@0.2.3</code></a></li>
 <li>interface <a href="#wasi_io_poll_0_2_3"><code>wasi:io/poll@0.2.3</code></a></li>
 <li>interface <a href="#wasi_io_streams_0_2_3"><code>wasi:io/streams@0.2.3</code></a></li>
-<li>interface <a href="#wasi_tls_types_0_2_3"><code>wasi:tls/types@0.2.3</code></a></li>
+<li>interface <a href="#wasi_tls_types_0_2_0_draft"><code>wasi:tls/types@0.2.0-draft</code></a></li>
 </ul>
 </li>
 </ul>
@@ -425,7 +425,7 @@ is ready for reading, before performing the <code>splice</code>.</p>
 <ul>
 <li><a id="method_output_stream_blocking_splice.0"></a> result&lt;<code>u64</code>, <a href="#stream_error"><a href="#stream_error"><code>stream-error</code></a></a>&gt;</li>
 </ul>
-<h2><a id="wasi_tls_types_0_2_3"></a>Import interface wasi:tls/types@0.2.3</h2>
+<h2><a id="wasi_tls_types_0_2_0_draft"></a>Import interface wasi:tls/types@0.2.0-draft</h2>
 <hr />
 <h3>Types</h3>
 <h4><a id="input_stream"></a><code>type input-stream</code></h4>
