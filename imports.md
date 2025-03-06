@@ -462,6 +462,11 @@ is ready for reading, before performing the <code>splice</code>.</p>
 <ul>
 <li><a id="static_client_handshake_finish.0"></a> own&lt;<a href="#future_client_streams"><a href="#future_client_streams"><code>future-client-streams</code></a></a>&gt;</li>
 </ul>
+<h4><a id="method_client_connection_close_output"></a><code>[method]client-connection.close-output: func</code></h4>
+<h5>Params</h5>
+<ul>
+<li><a id="method_client_connection_close_output.self"></a><code>self</code>: borrow&lt;<a href="#client_connection"><a href="#client_connection"><code>client-connection</code></a></a>&gt;</li>
+</ul>
 <h4><a id="method_future_client_streams_subscribe"></a><code>[method]future-client-streams.subscribe: func</code></h4>
 <h5>Params</h5>
 <ul>

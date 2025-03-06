@@ -16,6 +16,8 @@ interface types {
 
     @unstable(feature = tls)
     resource client-connection {
+        @unstable(feature = tls)
+        close-output: func();
     }
 
     @unstable(feature = tls)
