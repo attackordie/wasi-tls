@@ -437,6 +437,9 @@ is ready for reading, before performing the <code>splice</code>.</p>
 #### <a id="pollable"></a>`type pollable`
 [`pollable`](#pollable)
 <p>
+#### <a id="io_error"></a>`type io-error`
+[`error`](#error)
+<p>
 #### <a id="client_handshake"></a>`resource client-handshake`
 <h4><a id="client_connection"></a><code>resource client-connection</code></h4>
 <h4><a id="future_client_streams"></a><code>resource future-client-streams</code></h4>
@@ -483,5 +486,5 @@ is ready for reading, before performing the <code>splice</code>.</p>
 </ul>
 <h5>Return values</h5>
 <ul>
-<li><a id="method_future_client_streams_get.0"></a> option&lt;result&lt;result&lt;(own&lt;<a href="#client_connection"><a href="#client_connection"><code>client-connection</code></a></a>&gt;, own&lt;<a href="#input_stream"><a href="#input_stream"><code>input-stream</code></a></a>&gt;, own&lt;<a href="#output_stream"><a href="#output_stream"><code>output-stream</code></a></a>&gt;)&gt;&gt;&gt;</li>
+<li><a id="method_future_client_streams_get.0"></a> option&lt;result&lt;result&lt;(own&lt;<a href="#client_connection"><a href="#client_connection"><code>client-connection</code></a></a>&gt;, own&lt;<a href="#input_stream"><a href="#input_stream"><code>input-stream</code></a></a>&gt;, own&lt;<a href="#output_stream"><a href="#output_stream"><code>output-stream</code></a></a>&gt;), own&lt;<a href="#io_error"><a href="#io_error"><code>io-error</code></a></a>&gt;&gt;&gt;&gt;</li>
 </ul>
