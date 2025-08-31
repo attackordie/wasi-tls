@@ -1,0 +1,38 @@
+# Generated files from wit-bindgen and wasm-tools
+*.wasm
+*.wat
+bindings/
+
+# Generated documentation from wit-bindgen
+tls-world.md
+tls-world.html
+
+# WIT dependency artifacts
+wit/deps.lock
+
+# Build artifacts
+target/
+build/
+dist/
+
+# Editor and IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Logs
+*.log
+
+# Claude Code files
+CLAUDE.md
