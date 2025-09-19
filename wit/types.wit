@@ -1,33 +1,885 @@
-@unstable(feature = tls)
-interface types {
-    @unstable(feature = tls)
-    use wasi:io/streams@0.2.6.{input-stream, output-stream};
-    @unstable(feature = tls)
-    use wasi:io/poll@0.2.6.{pollable};
-    @unstable(feature = tls)
-    use wasi:io/error@0.2.6.{error as io-error};
+package wasi:tls@0.1.0;
 
-    @unstable(feature = tls)
-    resource client-handshake {
-        @unstable(feature = tls)
-        constructor(server-name: string, input: input-stream, output: output-stream);
+/// Minimal WASI TLS 1.3 Interface - Security-First Design
+/// 
+/// This interface provides essential TLS 1.3 functionality required by RFC 8446,
+/// following the principle that simpler code has fewer errors. All cryptographic
+/// operations are performed by the host for security.
+///
+/// Design Principles:
+/// - TLS 1.3 ONLY: No TLS 1.2 support to prevent downgrade attacks
+/// - NO 0-RTT: Fundamental replay vulnerability per RFC 8446 Section 8
+/// - NO Session Resumption: Weakens forward secrecy 
+/// - NO Suspension Points: Natural async evolution for Preview 3
+/// - Minimal API surface: ~25 methods total to reduce error potential
+/// - Secure defaults: No configuration options that weaken security
+/// - Clear separation: Guest orchestrates, host performs all crypto
 
-        @unstable(feature = tls)
-        finish: static func(this: client-handshake) -> future-client-streams;
+interface tls {
+    use wasi:io/streams@0.2.0.{input-stream, output-stream};
+    use wasi:io/poll@0.2.0.{pollable};
+    
+    /// Protocol version - TLS 1.3 only per our security-first design
+    /// 0x0304: TLS 1.3 (RFC 8446)
+    /// Note: TLS 1.2 (0x0303) explicitly not supported to prevent downgrade attacks
+    type protocol-version = u16;  // Only 0x0304 accepted
+    
+    /// Extended cipher suites - supports TLS 1.3 and future PQC algorithms
+    /// Extended to u32 for future post-quantum cryptography compatibility
+    type extended-cipher-suite = u32;
+    // Current TLS 1.3 cipher suites (0x1300-0x13FF):
+    // 0x1301: TLS_AES_128_GCM_SHA256 (MUST implement)
+    // 0x1302: TLS_AES_256_GCM_SHA384 (SHOULD implement) 
+    // 0x1303: TLS_CHACHA20_POLY1305_SHA256 (SHOULD implement)
+    // Future PQC cipher suites (0x1400-0x14FF)
+    // Hybrid classical+PQC (0x1500-0x15FF)
+    
+    /// Legacy cipher suite type - kept for compatibility
+    type cipher-suite = u16;
+    
+    /// Supported groups for key exchange per RFC 8446 Section 9.1
+    type named-group = u16;
+    // 0x0017: secp256r1 (MUST implement per RFC 8446)
+    // 0x001d: x25519 (SHOULD implement per RFC 8446)
+    // 0x0018: secp384r1 (MAY implement)
+    // 0x0019: secp521r1 (MAY implement)
+    
+    /// Signature schemes per RFC 8446 Section 9.1
+    type signature-scheme = u16;
+    // Mandatory per RFC 8446 Section 9.1:
+    // 0x0401: rsa_pkcs1_sha256 (for certificates)
+    // 0x0403: ecdsa_secp256r1_sha256
+    // 0x0804: rsa_pss_rsae_sha256 (MUST implement for TLS 1.3)
+    
+    /// ALPN protocol identifier
+    type alpn-protocol = string;
+    
+    /// Server Name Indication
+    type server-name = string;
+    
+    /// Cryptographic strength classification for quantum readiness
+    @unstable(feature = tls)
+    enum crypto-strength {
+        /// Current RSA/ECDSA algorithms (hardware-accelerated)
+        classical,
+        /// Pure PQC algorithms (hardware-implemented)
+        quantum-resistant,
+        /// Classical + PQC hybrid (hardware-combined)
+        hybrid,
     }
-
+    
+    /// Post-quantum cryptography algorithm families
     @unstable(feature = tls)
-    resource client-connection {
-        @unstable(feature = tls)
-        close-output: func();
+    enum pqc-family {
+        /// ML-KEM (Kyber) key encapsulation
+        ml-kem,
+        /// ML-DSA (Dilithium) signatures
+        ml-dsa,
+        /// Falcon compact signatures
+        falcon-signatures,
+        /// SPHINCS+ hash-based signatures
+        sphincs-plus,
     }
-
+    
+    /// Hardware isolation levels
     @unstable(feature = tls)
-    resource future-client-streams {
+    enum isolation-level {
+        /// Process-level isolation
+        software-only,
+        /// Hardware memory protection
+        hardware-assisted,
+        /// TEE/enclave isolation
+        tee-isolated,
+        /// HSM hardware partitioning
+        hsm-partitioned,
+    }
+    
+    /// Public error categories (normalized timing, minimal information)
+    @unstable(feature = tls)
+    enum public-error-code {
+        /// Network-level errors
+        connection-failed,
+        /// Generic handshake failure
+        handshake-failed,
+        /// Generic certificate problem
+        certificate-invalid,
+        /// Generic protocol violation
+        protocol-error,
+        /// Rate limiting or quota exceeded
+        resource-exhausted,
+    }
+    
+    /// Legacy error types - kept for compatibility
+    enum error-code {
+        /// Connection-level errors
+        connection-refused,
+        connection-reset,
+        connection-timeout,
+        
+        /// TLS protocol errors
+        protocol-violation,
+        handshake-failure,
+        certificate-invalid,
+        certificate-expired,
+        certificate-untrusted,
+        
+        /// Configuration errors
+        unsupported-protocol-version,
+        no-common-cipher-suite,
+        no-common-signature-algorithm,
+        
+        /// Operational errors
+        would-block,
+        internal-error,
+    }
+    
+    /// X.509 certificate - minimal inspection only
+    @unstable(feature = tls)
+    resource certificate {
+        /// Get the certificate subject (DN)
+        @unstable(feature = tls)
+        subject: func() -> string;
+        
+        /// Get the certificate issuer (DN)
+        @unstable(feature = tls)
+        issuer: func() -> string;
+        
+        /// Verify hostname matches certificate
+        @unstable(feature = tls)
+        verify-hostname: func(hostname: server-name) -> bool;
+        
+        /// Export as DER for persistence/comparison
+        @unstable(feature = tls)
+        export-der: func() -> list<u8>;
+    }
+    
+    /// Private identity - certificate with private key (non-exportable)
+    @unstable(feature = tls)
+    resource private-identity {
+        /// Get the associated certificate
+        @unstable(feature = tls)
+        certificate: func() -> certificate;
+    }
+    
+    /// Active TLS connection
+    @unstable(feature = tls)
+    resource connection {
+        /// Get negotiated protocol version (always 0x0304 for TLS 1.3)
+        @unstable(feature = tls)
+        protocol-version: func() -> protocol-version;
+        
+        /// Get negotiated cipher suite (legacy)
+        @unstable(feature = tls)
+        cipher-suite: func() -> cipher-suite;
+        
+        /// Get extended cipher suite with PQC support
+        @unstable(feature = tls)
+        extended-cipher-suite: func() -> extended-cipher-suite;
+        
+        /// Get cryptographic strength of connection
+        @unstable(feature = tls)
+        crypto-strength: func() -> crypto-strength;
+        
+        /// Check if connection provides quantum resistance
+        @unstable(feature = tls)
+        is-quantum-safe: func() -> bool;
+        
+        /// Get detailed algorithm information for auditing
+        @unstable(feature = tls)
+        get-algorithms: func() -> connection-algorithms;
+        
+        /// Get peer certificate (if any)
+        @unstable(feature = tls)
+        peer-certificate: func() -> option<certificate>;
+        
+        /// Get negotiated ALPN protocol
+        @unstable(feature = tls)
+        alpn-protocol: func() -> option<alpn-protocol>;
+        
+        /// Configure traffic analysis protection
+        @unstable(feature = tls)
+        set-traffic-protection: func(policy: traffic-protection-policy) -> result<_, public-error-code>;
+        
+        /// Get current protection status
+        @unstable(feature = tls)
+        get-protection-status: func() -> traffic-protection-status;
+        
+        /// Send close_notify alert
+        @unstable(feature = tls)
+        close: func() -> result<_, error-code>;
+    }
+    
+    /// Detailed connection algorithm information
+    @unstable(feature = tls)
+    record connection-algorithms {
+        /// Key exchange algorithm
+        key-exchange: string,
+        /// Signature algorithm
+        signature: string,
+        /// Symmetric cipher
+        symmetric-cipher: string,
+        /// Hash algorithm
+        hash: string,
+    }
+    
+    /// Client TLS connection establishment
+    /// Following RFC 8446 Section 2 handshake flow
+    @unstable(feature = tls)
+    resource client {
+        /// Create a new client connection
+        /// Consumes the transport streams and returns encrypted streams
+        @unstable(feature = tls)
+        constructor(
+            /// Server hostname for SNI and certificate verification
+            server-name: server-name,
+            /// Transport input stream (ciphertext in)
+            transport-input: input-stream,
+            /// Transport output stream (ciphertext out)
+            transport-output: output-stream,
+        );
+        
+        /// Set ALPN protocols in preference order
+        /// RFC 8446 Section 9.2 requires ALPN support
+        @unstable(feature = tls)
+        set-alpn-protocols: func(protocols: list<alpn-protocol>) -> result<_, error-code>;
+        
+        /// Set client certificate for mutual TLS (optional)
+        @unstable(feature = tls)
+        set-identity: func(identity: borrow<private-identity>) -> result<_, error-code>;
+        
+        /// Set custom certificate validator
+        @unstable(feature = tls)
+        set-certificate-validator: func(validator: borrow<certificate-validator>) -> result<_, public-error-code>;
+        
+        /// Set handshake timeout (prevents hanging)
+        @unstable(feature = tls)
+        set-handshake-timeout: func(timeout-ms: u32) -> result<_, public-error-code>;
+        
+        /// Complete handshake and get connection + streams
+        @unstable(feature = tls)
+        finish: func() -> result<client-result, error-code>;
+        
+        /// Finish handshake with timing protection
+        @unstable(feature = tls)
+        finish-with-protection: func() -> protected-future-client-streams;
+        
+        /// Get pollable for async handshake
         @unstable(feature = tls)
         subscribe: func() -> pollable;
-
-        @unstable(feature = tls)
-        get: func() -> option<result<result<tuple<client-connection, input-stream, output-stream>, io-error>>>;
     }
+    
+    /// Result of successful client handshake
+    @unstable(feature = tls)
+    record client-result {
+        /// The established connection
+        connection: connection,
+        /// Decrypted input stream (plaintext from server)
+        input: input-stream,
+        /// Encrypted output stream (plaintext to server)
+        output: output-stream,
+    }
+    
+    /// Server TLS connection acceptance
+    /// Following RFC 8446 Section 2 handshake flow
+    @unstable(feature = tls)
+    resource server {
+        /// Create a new server connection
+        /// Consumes the transport streams and returns encrypted streams
+        @unstable(feature = tls)
+        constructor(
+            /// Transport input stream (ciphertext in)
+            transport-input: input-stream,
+            /// Transport output stream (ciphertext out)
+            transport-output: output-stream,
+        );
+        
+        /// Set server identity (MUST be called before finish)
+        /// RFC 8446 requires server authentication
+        @unstable(feature = tls)
+        set-identity: func(identity: borrow<private-identity>) -> result<_, error-code>;
+        
+        /// Set supported ALPN protocols
+        @unstable(feature = tls)
+        set-alpn-protocols: func(protocols: list<alpn-protocol>) -> result<_, error-code>;
+        
+        /// Require client certificate (mutual TLS)
+        @unstable(feature = tls)
+        set-client-auth-required: func(required: bool) -> result<_, error-code>;
+        
+        /// Complete handshake and get connection + streams
+        @unstable(feature = tls)
+        finish: func() -> result<server-result, error-code>;
+        
+        /// Get pollable for async handshake
+        @unstable(feature = tls)
+        subscribe: func() -> pollable;
+    }
+    
+    /// Result of successful server handshake
+    @unstable(feature = tls)
+    record server-result {
+        /// The established connection
+        connection: connection,
+        /// Decrypted input stream (plaintext from client)
+        input: input-stream,
+        /// Encrypted output stream (plaintext to client)  
+        output: output-stream,
+    }
+    
+    /// Import a private identity from PEM
+    /// WARNING: This should only be used in development/testing
+    /// Production systems should use preopened identities for security
+    @unstable(feature = tls)
+    import-identity: func(
+        cert-pem: string,
+        key-pem: string
+    ) -> result<private-identity, error-code>;
+    
+    /// Import a certificate from PEM
+    @unstable(feature = tls)
+    import-certificate: func(cert-pem: string) -> result<certificate, error-code>;
+    
+    /// Get default trusted root certificates
+    /// These should be the standard CA certificates trusted by the host
+    @unstable(feature = tls)
+    get-default-roots: func() -> list<certificate>;
+    
+    // ============================================================================
+    // Hardware-Accelerated Crypto Component (HACC) Interfaces
+    // ============================================================================
+    
+    /// Post-quantum cryptography algorithm information
+    @unstable(feature = tls)
+    record pqc-algorithm-info {
+        algorithm-family: pqc-family,
+        /// NIST security levels 1-5
+        security-level: u8,
+        hardware-accelerated: bool,
+        constant-time-guaranteed: bool,
+    }
+    
+    /// Hardware crypto component information and capabilities
+    @unstable(feature = tls)
+    resource hardware-crypto-info {
+        /// Query available PQC algorithms in hardware
+        @unstable(feature = tls)
+        get-pqc-support: func() -> list<pqc-algorithm-info>;
+        
+        /// Check if hybrid mode is hardware-accelerated
+        @unstable(feature = tls)
+        supports-hardware-hybrid: func() -> bool;
+        
+        /// Get hardware crypto component attestation
+        @unstable(feature = tls)
+        get-component-attestation: func() -> result<list<u8>, error-code>;
+    }
+    
+    /// Hardware isolation attestation information
+    @unstable(feature = tls)
+    record isolation-attestation {
+        isolation-level: isolation-level,
+        attestation-signature: list<u8>,
+        hardware-backed: bool,
+        verified-at: u64, // timestamp
+    }
+    
+    /// Hardware resource isolation information
+    @unstable(feature = tls)
+    record hardware-isolation-info {
+        dedicated-cache-ways: u32,
+        isolated-memory-regions: u32,
+        separate-crypto-engines: bool,
+        tee-protected: bool,
+    }
+    
+    /// Component isolation verification
+    @unstable(feature = tls)
+    resource component-isolation-verifier {
+        /// Cryptographically verify component isolation
+        @unstable(feature = tls)
+        verify-isolation: func() -> result<isolation-attestation, error-code>;
+        
+        /// Check hardware resource separation
+        @unstable(feature = tls)
+        get-resource-isolation: func() -> hardware-isolation-info;
+    }
+    
+    /// Resource limits configuration
+    @unstable(feature = tls)
+    record resource-limits {
+        /// Connection limits
+        max-concurrent-connections: u32,
+        max-connections-per-second: u32,
+        max-total-connections-lifetime: u32,
+        
+        /// Memory limits
+        max-certificate-chain-length: u32,
+        max-certificate-size-bytes: u32,
+        max-handshake-buffer-size: u32,
+        
+        /// Time limits  
+        max-handshake-time-ms: u32,
+        max-connection-idle-time-ms: u32,
+        max-total-connection-time-ms: u32,
+        
+        /// CPU limits
+        max-crypto-operations-per-second: u32,
+        max-certificate-validations-per-second: u32,
+    }
+    
+    /// Current resource usage tracking
+    @unstable(feature = tls)
+    record resource-usage {
+        current-connections: u32,
+        connections-created-this-second: u32,
+        total-memory-used: u32,
+        active-crypto-operations: u32,
+    }
+    
+    /// Types of resource operations
+    @unstable(feature = tls)
+    enum resource-operation {
+        create-connection,
+        validate-certificate,
+        perform-handshake,
+    }
+    
+    /// Resource management and enforcement
+    @unstable(feature = tls)
+    resource resource-manager {
+        /// Set limits for this component
+        @unstable(feature = tls)
+        set-limits: func(limits: resource-limits) -> result<_, error-code>;
+        
+        /// Get current resource usage
+        @unstable(feature = tls)
+        get-usage: func() -> resource-usage;
+        
+        /// Check if operation would exceed limits
+        @unstable(feature = tls)
+        would-exceed-limits: func(operation: resource-operation) -> bool;
+    }
+    
+    // ============================================================================
+    // Traffic Analysis Protection
+    // ============================================================================
+    
+    /// Traffic protection policies
+    @unstable(feature = tls)
+    record traffic-protection-policy {
+        /// Minimum TLS record size (pad smaller records)
+        min-record-size: u32,
+        
+        /// Maximum padding per record
+        max-padding-bytes: u32,
+        
+        /// Random delay injection
+        random-delay-max-ms: u32,
+        
+        /// Flow control obfuscation
+        obfuscate-flow-control: bool,
+    }
+    
+    /// Current traffic protection status
+    @unstable(feature = tls)
+    record traffic-protection-status {
+        padding-active: bool,
+        timing-jitter-active: bool,
+        flow-obfuscation-active: bool,
+        protection-overhead-percent: f32,
+    }
+    
+    // ============================================================================
+    // Certificate Validation System
+    // ============================================================================
+    
+    /// Key usage flags for certificate validation
+    @unstable(feature = tls)
+    enum key-usage-flag {
+        digital-signature,
+        key-encipherment,
+        key-agreement,
+        certificate-signing,
+        crl-signing,
+        content-commitment,
+        data-encipherment,
+        key-cert-sign,
+        crl-sign,
+        encipher-only,
+        decipher-only,
+    }
+    
+    /// Declarative validation rules (no timing attacks)
+    @unstable(feature = tls)
+    variant validation-rule {
+        /// Subject DN requirements
+        subject-dn-contains(string),
+        subject-dn-equals(string),
+        
+        /// Issuer requirements
+        issuer-dn-contains(string),
+        issuer-ca-in-list(list<list<u8>>), // CA fingerprints
+        
+        /// Extension requirements
+        extension-present(string), // OID
+        extension-value-equals(tuple<string, list<u8>>), // OID, expected value
+        extension-critical(string), // OID must be marked critical
+        
+        /// Validity requirements
+        valid-after(u64), // Unix timestamp
+        valid-before(u64), // Unix timestamp
+        max-validity-period-days(u32),
+        
+        /// Key requirements
+        key-usage-includes(list<key-usage-flag>),
+        extended-key-usage-includes(list<string>), // OIDs
+        min-key-size-bits(u32),
+        
+        /// Certificate Transparency
+        require-sct-count(u8), // Minimum SCT count
+        require-ct-log-inclusion(list<string>), // Required log URLs
+        
+        /// Certificate pinning
+        pin-certificate-fingerprint(list<u8>), // SHA-256 of cert
+        pin-public-key-fingerprint(list<u8>), // SHA-256 of SPKI
+        pin-ca-fingerprint(list<u8>), // SHA-256 of issuer cert
+    }
+    
+    /// Certificate validation result
+    @unstable(feature = tls)
+    record validation-result {
+        trusted: bool,
+        rules-passed: u32,
+        rules-failed: u32,
+        bypass-used: bool,
+        validation-time-ms: u32, // Always normalized
+    }
+    
+    /// Validation error information
+    @unstable(feature = tls)
+    variant validation-error {
+        rule-failed(validation-rule),
+        certificate-malformed,
+        timeout,
+        resource-exhausted,
+    }
+    
+    /// Certificate validator builder (declarative, timing-safe)
+    @unstable(feature = tls)
+    resource certificate-validator {
+        /// Create a new certificate validator
+        @unstable(feature = tls)
+        constructor();
+        /// Add validation rules (declarative, no timing leaks)
+        @unstable(feature = tls)
+        add-rule: func(rule: validation-rule) -> result<_, public-error-code>;
+        
+        /// Set emergency bypass token (for operational emergencies)
+        @unstable(feature = tls)
+        set-bypass-token: func(token: string, max-age-seconds: u32) -> result<_, public-error-code>;
+        
+        /// Validate certificate against all rules
+        @unstable(feature = tls)
+        validate: func(cert: borrow<certificate>) -> result<validation-result, validation-error>;
+    }
+    
+    /// Create a certificate validator (factory function)
+    @unstable(feature = tls)
+    create-certificate-validator: func() -> result<certificate-validator, public-error-code>;
+    
+    // ============================================================================
+    // Security Policy Management
+    // ============================================================================
+    
+    /// Certificate validation policy configuration
+    @unstable(feature = tls)
+    record certificate-validation-policy {
+        /// Host validation level
+        host-validation-level: validation-level,
+        
+        /// Allow custom validation rules
+        allow-custom-rules: bool,
+        
+        /// Certificate pinning policy
+        pinning-policy: pinning-policy,
+        
+        /// Certificate Transparency requirements
+        ct-policy: ct-policy,
+    }
+    
+    /// Validation security levels
+    @unstable(feature = tls)
+    enum validation-level {
+        strict,     // Maximum security, minimal flexibility
+        standard,   // Balanced security and compatibility  
+        permissive, // Maximum compatibility (not recommended)
+    }
+    
+    /// Certificate pinning policy configuration
+    @unstable(feature = tls)
+    record pinning-policy {
+        allow-certificate-pinning: bool,
+        allow-public-key-pinning: bool,
+        max-pin-duration-seconds: u32,
+        require-backup-pins: bool,
+    }
+    
+    /// Certificate Transparency policy
+    @unstable(feature = tls)
+    record ct-policy {
+        require-scts: bool,
+        min-sct-count: u8,
+        require-log-inclusion-proof: bool,
+        trusted-ct-logs: list<string>, // Log URLs
+    }
+    
+    /// Component isolation policy configuration
+    @unstable(feature = tls)
+    record component-isolation-policy {
+        /// Each component gets isolated session cache
+        isolate-session-cache: bool,
+        
+        /// Prevent cross-component timing observations
+        normalize-api-timing: bool,
+        
+        /// Randomize resource handle allocation
+        randomize-handles: bool,
+        
+        /// Maximum resources per component
+        max-concurrent-connections: u32,
+    }
+    
+    /// Error disclosure policy levels
+    @unstable(feature = tls)
+    enum error-disclosure-policy {
+        minimal,    // Only public error categories
+        standard,   // Public errors + sanitized details
+        debug,      // Full error details (development only)
+    }
+    
+    /// Master security policy for component
+    @unstable(feature = tls)
+    record security-policy {
+        /// Protocol restrictions
+        allowed-protocol-versions: list<protocol-version>,
+        allowed-cipher-suites: list<extended-cipher-suite>,
+        require-perfect-forward-secrecy: bool,
+        
+        /// Certificate validation policy
+        certificate-validation: certificate-validation-policy,
+        
+        /// Resource limits
+        resource-limits: resource-limits,
+        
+        /// Traffic protection
+        traffic-protection: traffic-protection-policy,
+        
+        /// Component isolation
+        isolation-policy: component-isolation-policy,
+        
+        /// Error disclosure level
+        error-disclosure: error-disclosure-policy,
+    }
+    
+    /// Policy validation result
+    @unstable(feature = tls)
+    record policy-validation-result {
+        valid: bool,
+        warnings: list<string>,
+        security-score: u8, // 0-100, higher is more secure
+    }
+    
+    /// Security policy manager
+    @unstable(feature = tls)
+    resource security-policy-manager {
+        /// Create a new security policy manager
+        @unstable(feature = tls)
+        constructor();
+        /// Set policy for this component (host-enforced)
+        @unstable(feature = tls)
+        set-policy: func(policy: security-policy) -> result<_, public-error-code>;
+        
+        /// Get current effective policy
+        @unstable(feature = tls)
+        get-policy: func() -> security-policy;
+        
+        /// Validate policy before setting
+        @unstable(feature = tls)
+        validate-policy: func(policy: security-policy) -> result<policy-validation-result, public-error-code>;
+    }
+    
+    /// Create a security policy manager (factory function)
+    @unstable(feature = tls)
+    create-security-policy-manager: func() -> result<security-policy-manager, public-error-code>;
+    
+    // ============================================================================
+    // Async Timing Protection
+    // ============================================================================
+    
+    /// Poll result with timing protection
+    @unstable(feature = tls)
+    enum poll-result {
+        ready,      // Operation completed
+        pending,    // Still in progress
+        timeout,    // Exceeded timeout
+    }
+    
+    /// Pollable with timing normalization
+    @unstable(feature = tls)
+    resource protected-pollable {
+        /// Poll with consistent timing regardless of actual state
+        @unstable(feature = tls)
+        poll: func() -> poll-result;
+        
+        /// Set maximum wait time (prevents DoS)
+        @unstable(feature = tls)
+        set-timeout: func(timeout-ms: u32) -> result<_, public-error-code>;
+    }
+    
+    /// Async operation with timing protection
+    @unstable(feature = tls)
+    resource protected-future-client-streams {
+        /// Subscribe with timing protection
+        @unstable(feature = tls)
+        subscribe-with-protection: func() -> protected-pollable;
+        
+        /// Get result with normalized timing
+        @unstable(feature = tls)
+        get-result: func() -> result<client-result, public-error-code>;
+        
+        /// Check completion status without timing leaks
+        @unstable(feature = tls)
+        is-ready: func() -> bool; // Always takes same time
+    }
+    
+    // ============================================================================
+    // Deployment Model Configuration
+    // ============================================================================
+    
+    /// Hardware deployment model types
+    @unstable(feature = tls)
+    enum deployment-model {
+        software-only,      // No hardware acceleration
+        hardware-accelerated, // AES-NI, SHA extensions, etc.
+        tee-protected,      // SGX enclave, TrustZone
+        hsm-backed,         // Hardware Security Module
+        webcrypto-fallback, // Browser WebCrypto API
+    }
+    
+    /// TEE deployment configuration
+    @unstable(feature = tls)
+    record tee-deployment-policy {
+        require-remote-attestation: bool,
+        attestation-service-url: string,
+        sealed-storage-policy: sealed-storage-policy,
+        enclave-measurement-validation: bool,
+        side-channel-countermeasures: list<countermeasure-type>,
+    }
+    
+    /// Sealed storage policy for TEE
+    @unstable(feature = tls)
+    record sealed-storage-policy {
+        enable-sealing: bool,
+        key-derivation-policy: string,
+        hardware-binding-required: bool,
+    }
+    
+    /// Side-channel countermeasure types
+    @unstable(feature = tls)
+    enum countermeasure-type {
+        speculation-barriers,
+        cache-line-isolation,
+        power-analysis-masking,
+        timing-randomization,
+    }
+    
+    /// HSM deployment configuration
+    @unstable(feature = tls)
+    record hsm-deployment-policy {
+        require-hsm-attestation: bool,
+        network-isolation-level: isolation-level,
+        key-ceremony-required: bool,
+        audit-log-integrity-check: bool,
+        hsm-failover-configuration: hsm-failover-policy,
+    }
+    
+    /// HSM failover policy
+    @unstable(feature = tls)
+    record hsm-failover-policy {
+        enable-failover: bool,
+        max-failover-attempts: u32,
+        failover-delay-ms: u32,
+    }
+    
+    /// Browser deployment configuration
+    @unstable(feature = tls)
+    record browser-deployment-policy {
+        webcrypto-fallback-allowed: bool,
+        minimum-browser-security-level: browser-security-level,
+        csp-requirements: content-security-policy,
+        same-origin-enforcement: bool,
+        key-storage-preferences: list<key-storage-option>,
+    }
+    
+    /// Browser security levels
+    @unstable(feature = tls)
+    enum browser-security-level {
+        basic,      // Standard browser security
+        enhanced,   // Enhanced security features required
+        strict,     // Maximum browser security enforcement
+    }
+    
+    /// Content Security Policy configuration
+    @unstable(feature = tls)
+    record content-security-policy {
+        script-src-policy: string,
+        connect-src-policy: string,
+        require-sri: bool,
+    }
+    
+    /// Key storage options for browser deployment
+    @unstable(feature = tls)
+    enum key-storage-option {
+        browser-keystore,
+        indexeddb-encrypted,
+        memory-only,
+    }
+    
+    /// Hardware deployment configuration manager
+    @unstable(feature = tls)
+    resource deployment-manager {
+        /// Get current deployment model
+        @unstable(feature = tls)
+        get-deployment-model: func() -> deployment-model;
+        
+        /// Configure TEE deployment
+        @unstable(feature = tls)
+        configure-tee-deployment: func(policy: tee-deployment-policy) -> result<_, public-error-code>;
+        
+        /// Configure HSM deployment
+        @unstable(feature = tls)
+        configure-hsm-deployment: func(policy: hsm-deployment-policy) -> result<_, public-error-code>;
+        
+        /// Configure browser deployment
+        @unstable(feature = tls)
+        configure-browser-deployment: func(policy: browser-deployment-policy) -> result<_, public-error-code>;
+        
+        /// Get deployment capabilities
+        @unstable(feature = tls)
+        get-deployment-capabilities: func() -> deployment-capabilities;
+    }
+    
+    /// Deployment model capabilities
+    @unstable(feature = tls)
+    record deployment-capabilities {
+        hardware-acceleration-available: bool,
+        tee-support-available: bool,
+        hsm-support-available: bool,
+        webcrypto-support-available: bool,
+        supported-countermeasures: list<countermeasure-type>,
+    }
+    
+    /// Create a deployment manager (factory function)
+    @unstable(feature = tls)
+    create-deployment-manager: func() -> result<deployment-manager, public-error-code>;
 }

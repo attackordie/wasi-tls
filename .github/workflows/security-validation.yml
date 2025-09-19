@@ -1,0 +1,247 @@
+name: Security Validation
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run security validation daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  security-validation:
+    name: Comprehensive Security Testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    strategy:
+      matrix:
+        security-level: [basic, rfc8446, advanced, exploit]
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+        
+    - name: Install WASM tools
+      run: |
+        cargo install wit-bindgen-cli@0.38.0
+        cargo install wasm-tools@1.224.0
+        cargo install cargo-component@0.15.0
+        rustup target add wasm32-wasi-preview2
+        
+    - name: Cache Cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target/
+        key: ${{ runner.os }}-cargo-security-${{ hashFiles('**/Cargo.lock') }}
+        
+    - name: Build security testing framework
+      run: |
+        cd test/implementations/rust
+        cargo build --release --all-targets
+        
+    - name: Run WIT interface validation
+      run: |
+        cd test/implementations/rust
+        cargo test wit_validation --release -- --nocapture
+        
+    - name: Run security compliance tests
+      run: |
+        cd test/implementations/rust  
+        cargo test security --release -- --nocapture
+        
+    - name: Run fuzzing campaign (short)
+      if: matrix.security-level == 'exploit'
+      run: |
+        cd test/implementations/rust
+        timeout 300 cargo test fuzzing --release -- --nocapture || true
+        
+    - name: Run stress testing
+      run: |
+        cd test/implementations/rust
+        cargo test stress --release -- --nocapture
+        
+    - name: Run comprehensive security validator
+      run: |
+        cd test/implementations/rust
+        cargo run --release --bin security-validator -- \
+          --level ${{ matrix.security-level }} \
+          --output security-report-${{ matrix.security-level }}.json \
+          --verbose
+          
+    - name: Upload security report
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-report-${{ matrix.security-level }}
+        path: test/implementations/rust/security-report-${{ matrix.security-level }}.json
+        retention-days: 30
+        
+    - name: Check for critical vulnerabilities
+      run: |
+        cd test/implementations/rust
+        if cargo run --release --bin security-validator -- \
+           --level ${{ matrix.security-level }} \
+           --fail-fast; then
+          echo "✅ No critical security vulnerabilities found"
+        else
+          echo "❌ Critical security vulnerabilities detected"
+          exit 1
+        fi
+
+  abi-validation:
+    name: WIT ABI Up-to-Date Check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: WebAssembly/wit-abi-up-to-date@v22
+      with:
+        features: 'tls'
+        wit-bindgen: '0.38.0'
+        wasm-tools: '1.224.0'
+
+  security-audit:
+    name: Rust Security Audit
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Security audit
+      uses: rustsec/audit-check@v1.4.1
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+    - name: Dependency Review
+      uses: actions/dependency-review-action@v3
+      with:
+        fail-on-severity: moderate
+
+  security-summary:
+    name: Security Validation Summary
+    runs-on: ubuntu-latest
+    needs: [security-validation, abi-validation, security-audit]
+    if: always()
+    
+    steps:
+    - name: Download all security reports
+      uses: actions/download-artifact@v3
+      
+    - name: Generate security summary
+      run: |
+        echo "# 🛡️ WASI-TLS Security Validation Report" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+        
+        # Check each security level
+        for level in basic rfc8446 advanced exploit; do
+          if [ -f "security-report-$level/security-report-$level.json" ]; then
+            echo "### Security Level: $level" >> $GITHUB_STEP_SUMMARY
+            
+            # Extract key metrics from JSON report
+            total_tests=$(jq '.total_tests' "security-report-$level/security-report-$level.json")
+            passed_tests=$(jq '.passed_tests' "security-report-$level/security-report-$level.json")
+            critical_failures=$(jq '.critical_failures' "security-report-$level/security-report-$level.json")
+            overall_status=$(jq -r '.summary.overall_status' "security-report-$level/security-report-$level.json")
+            
+            echo "- **Total Tests:** $total_tests" >> $GITHUB_STEP_SUMMARY
+            echo "- **Passed:** $passed_tests" >> $GITHUB_STEP_SUMMARY
+            echo "- **Critical Failures:** $critical_failures" >> $GITHUB_STEP_SUMMARY  
+            echo "- **Status:** $overall_status" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            if [ "$critical_failures" != "0" ]; then
+              echo "🚨 **CRITICAL SECURITY ISSUES FOUND IN $level LEVEL**" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+        done
+        
+        # Overall security posture
+        echo "## 🔒 Security Posture" >> $GITHUB_STEP_SUMMARY
+        
+        if ls security-report-*/security-report-*.json 1> /dev/null 2>&1; then
+          critical_count=$(jq -s 'map(.critical_failures) | add' security-report-*/security-report-*.json)
+          
+          if [ "$critical_count" = "0" ]; then
+            echo "✅ **SECURE** - No critical vulnerabilities detected" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **VULNERABLE** - $critical_count critical issues require immediate attention" >> $GITHUB_STEP_SUMMARY
+          fi
+        else
+          echo "⚠️ **UNKNOWN** - Security reports not available" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## 📋 Next Steps" >> $GITHUB_STEP_SUMMARY
+        echo "1. Review detailed security reports in artifacts" >> $GITHUB_STEP_SUMMARY
+        echo "2. Address any critical or high-risk vulnerabilities" >> $GITHUB_STEP_SUMMARY  
+        echo "3. Re-run security validation after fixes" >> $GITHUB_STEP_SUMMARY
+        echo "4. Consider penetration testing for production deployment" >> $GITHUB_STEP_SUMMARY
+        
+    - name: Fail on critical vulnerabilities
+      run: |
+        if ls security-report-*/security-report-*.json 1> /dev/null 2>&1; then
+          critical_count=$(jq -s 'map(.critical_failures) | add' security-report-*/security-report-*.json)
+          if [ "$critical_count" != "0" ]; then
+            echo "❌ Failing build due to $critical_count critical security vulnerabilities"
+            exit 1
+          fi
+        fi
+
+  security-notification:
+    name: Security Alert Notification
+    runs-on: ubuntu-latest
+    needs: [security-validation]
+    if: failure() && (github.event_name == 'push' || github.event_name == 'schedule')
+    
+    steps:
+    - name: Create security issue
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const title = `🚨 Security Validation Failed - ${context.eventName}`;
+          const body = `
+          Security validation has failed on the ${context.ref} branch.
+          
+          **Failure Details:**
+          - Event: ${context.eventName}
+          - SHA: ${context.sha}
+          - Workflow: ${context.workflow}
+          - Run: ${context.runNumber}
+          
+          **Required Actions:**
+          1. Review the security validation logs
+          2. Address any critical vulnerabilities immediately
+          3. Do not merge or deploy until issues are resolved
+          
+          **View Results:**
+          ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
+          `;
+          
+          // Create issue if critical security failures
+          await github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: title,
+            body: body,
+            labels: ['security', 'critical', 'bug']
+          });

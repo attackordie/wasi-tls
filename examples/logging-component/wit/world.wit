@@ -1,0 +1,102 @@
+package logging:component@0.1.0;
+
+/// Example logging component that consumes WASI-TLS
+/// This demonstrates the recommended approach for component integration
+world logging-world {
+    // Import WASI-TLS for encrypted connections
+    import wasi:tls/tls@0.1.0;
+    
+    // Import required I/O and networking interfaces  
+    import wasi:io/streams@0.2.0;
+    import wasi:io/poll@0.2.0;
+    import wasi:sockets/tcp@0.2.0;
+    import wasi:sockets/network@0.2.0;
+    import wasi:sockets/instance-network@0.2.0;
+    
+    // Export the secure logging interface
+    export secure-logger;
+}
+
+/// Secure logging interface with TLS encryption
+interface secure-logger {
+    use wasi:tls/tls@0.1.0.{client, connection, error-code};
+    
+    /// Configuration for encrypted logging to Cloudflare D1
+    record cloudflare-log-config {
+        /// Cloudflare account ID
+        account-id: string,
+        /// Database ID  
+        database-id: string,
+        /// API token for authentication
+        api-token: string,
+        /// Application identifier
+        app-id: string,
+        /// Log level threshold
+        min-level: log-level,
+        /// Enable batch mode for performance
+        batch-mode: bool,
+        /// Batch size (if batch-mode is true)
+        batch-size: u32,
+    }
+    
+    /// Standard log levels
+    enum log-level {
+        trace,
+        debug,
+        info,
+        warn,
+        error,
+        fatal,
+    }
+    
+    /// Structured log entry for D1 storage
+    record log-entry {
+        /// ISO 8601 timestamp
+        timestamp: string,
+        /// Log level
+        level: log-level,
+        /// Log message
+        message: string,
+        /// Source component or module
+        source: string,
+        /// Optional trace ID for correlation
+        trace-id: option<string>,
+        /// Optional structured metadata (JSON string)
+        metadata: option<string>,
+    }
+    
+    /// Encrypted logger for Cloudflare D1
+    resource cloudflare-logger {
+        /// Initialize encrypted logging to Cloudflare D1
+        constructor(config: cloudflare-log-config);
+        
+        /// Send a single log entry over encrypted HTTPS
+        log: func(entry: log-entry) -> result<_, error-code>;
+        
+        /// Send multiple log entries in a single request
+        log-batch: func(entries: list<log-entry>) -> result<_, error-code>;
+        
+        /// Flush any buffered logs immediately
+        flush: func() -> result<_, error-code>;
+        
+        /// Close the connection and cleanup resources
+        close: func() -> result<_, error-code>;
+        
+        /// Get current connection statistics
+        get-stats: func() -> logger-stats;
+    }
+    
+    /// Connection and performance statistics
+    record logger-stats {
+        /// Number of log entries sent
+        entries-sent: u64,
+        /// Number of bytes transmitted
+        bytes-sent: u64,
+        /// Number of connection errors
+        connection-errors: u32,
+        /// Average request latency in milliseconds
+        avg-latency-ms: u32,
+        /// Current connection status
+        connected: bool,
+    }
+}

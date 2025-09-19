@@ -1,0 +1,603 @@
+/// Enhanced WASI TLS 1.3 Interface - Security-First Design with Resolved Critical Questions
+/// 
+/// This interface extends the minimal WASI TLS 1.3 functionality to address critical
+/// unaddressed security questions identified in SECURITY-ANALYSIS.md.
+/// All cryptographic operations are performed by the host for security.
+///
+/// Design Principles:
+/// - TLS 1.3 ONLY: No TLS 1.2 support to prevent downgrade attacks
+/// - NO 0-RTT: Fundamental replay vulnerability per RFC 8446 Section 8
+/// - NO Session Resumption: Weakens forward secrecy 
+/// - Host-enforced security policies and resource limits
+/// - Cross-component isolation with timing attack protection
+/// - Post-quantum cryptography readiness
+/// - Declarative certificate validation (no timing attacks)
+
+interface enhanced-tls {
+    use wasi:io/streams@0.2.0.{input-stream, output-stream};
+    use wasi:io/poll@0.2.0.{pollable};
+    
+    // === CORE SECURITY TYPES ===
+    
+    /// Protocol version - TLS 1.3 only per security-first design
+    /// 0x0304: TLS 1.3 (RFC 8446) - ONLY supported version
+    type protocol-version = u16;
+    
+    /// Extended cipher suite support for post-quantum migration
+    /// Current TLS 1.3: 0x1300-0x13FF
+    /// Future PQC: 0x1400-0x14FF  
+    /// Hybrid: 0x1500-0x15FF
+    type extended-cipher-suite = u32;
+    
+    /// Cryptographic strength classification
+    enum crypto-strength {
+        classical,           // Current RSA/ECDSA/DHE
+        quantum-resistant,   // Pure PQC algorithms
+        hybrid,             // Classical + PQC hybrid
+    }
+    
+    /// Supported groups for key exchange per RFC 8446 Section 9.1
+    type named-group = u16;
+    
+    /// Signature schemes per RFC 8446 Section 9.1  
+    type signature-scheme = u16;
+    
+    /// ALPN protocol identifier
+    type alpn-protocol = string;
+    
+    /// Server Name Indication
+    type server-name = string;
+    
+    // === ERROR HANDLING WITH TIMING PROTECTION ===
+    
+    /// Public error categories (normalized timing, minimal information)
+    enum public-error-code {
+        connection-failed,      // Network-level errors
+        handshake-failed,       // Generic handshake failure
+        certificate-invalid,    // Generic certificate problem  
+        protocol-error,         // Generic protocol violation
+        resource-exhausted,     // Rate limiting or quota exceeded
+    }
+    
+    /// Detailed errors only for authorized debugging
+    enum detailed-error-code {
+        certificate-expired,
+        certificate-revoked,
+        certificate-hostname-mismatch,
+        certificate-chain-invalid,
+        certificate-signature-invalid,
+        unsupported-cipher-suite,
+        protocol-version-mismatch,
+        handshake-timeout,
+        resource-limit-exceeded,
+    }
+    
+    /// Error reporting with authorization and timing protection
+    @unstable(feature = tls)
+    resource error-reporter {
+        /// Get public error (always available, normalized timing)
+        @unstable(feature = tls)
+        get-public-error: func() -> public-error-code;
+        
+        /// Get detailed error (requires debug authorization)
+        @unstable(feature = tls) 
+        get-detailed-error: func(auth-token: string) -> result<detailed-error-code, string>;
+        
+        /// Get error context for debugging (requires authorization)
+        @unstable(feature = tls)
+        get-debug-context: func(auth-token: string) -> result<string, string>;
+    }
+    
+    // === RESOURCE MANAGEMENT AND DOS PROTECTION ===
+    
+    /// Resource limits configuration
+    record resource-limits {
+        /// Connection limits
+        max-concurrent-connections: u32,
+        max-connections-per-second: u32,
+        max-total-connections-lifetime: u32,
+        
+        /// Memory limits
+        max-certificate-chain-length: u32,
+        max-certificate-size-bytes: u32,
+        max-handshake-buffer-size: u32,
+        
+        /// Time limits
+        max-handshake-time-ms: u32,
+        max-connection-idle-time-ms: u32,
+        max-total-connection-time-ms: u32,
+        
+        /// CPU limits
+        max-crypto-operations-per-second: u32,
+        max-certificate-validations-per-second: u32,
+    }
+    
+    record resource-usage {
+        current-connections: u32,
+        connections-created-this-second: u32,
+        total-memory-used: u32,
+        active-crypto-operations: u32,
+    }
+    
+    enum resource-operation {
+        create-connection,
+        validate-certificate,
+        perform-handshake,
+    }
+    
+    /// Resource monitoring and enforcement
+    @unstable(feature = tls)
+    resource resource-manager {
+        /// Set limits for this component
+        @unstable(feature = tls)
+        set-limits: func(limits: resource-limits) -> result<_, public-error-code>;
+        
+        /// Get current resource usage
+        @unstable(feature = tls)
+        get-usage: func() -> resource-usage;
+        
+        /// Check if operation would exceed limits
+        @unstable(feature = tls)
+        would-exceed-limits: func(operation: resource-operation) -> bool;
+    }
+    
+    // === CROSS-COMPONENT ISOLATION ===
+    
+    /// Component isolation policy (configured by host)
+    record component-isolation-policy {
+        /// Each component gets isolated session cache
+        isolate-session-cache: bool,
+        
+        /// Prevent cross-component timing observations
+        normalize-api-timing: bool,
+        
+        /// Randomize resource handle allocation
+        randomize-handles: bool,
+        
+        /// Maximum resources per component
+        max-concurrent-connections: u32,
+    }
+    
+    // === TRAFFIC ANALYSIS PROTECTION ===
+    
+    /// Traffic protection policies
+    record traffic-protection-policy {
+        /// Minimum TLS record size (pad smaller records)
+        min-record-size: u32,
+        
+        /// Maximum padding per record
+        max-padding-bytes: u32,
+        
+        /// Random delay injection
+        random-delay-max-ms: u32,
+        
+        /// Flow control obfuscation
+        obfuscate-flow-control: bool,
+    }
+    
+    record traffic-protection-status {
+        padding-active: bool,
+        timing-jitter-active: bool,
+        flow-obfuscation-active: bool,
+        protection-overhead-percent: f32,
+    }
+    
+    // === CERTIFICATE VALIDATION (DECLARATIVE) ===
+    
+    /// Declarative validation rules (no timing attacks)
+    enum validation-rule {
+        /// Subject DN requirements
+        subject-dn-contains(string),
+        subject-dn-equals(string),
+        
+        /// Issuer requirements
+        issuer-dn-contains(string),
+        issuer-ca-in-list(list<list<u8>>), // CA fingerprints
+        
+        /// Extension requirements
+        extension-present(string), // OID
+        extension-value-equals(string, list<u8>), // OID, expected value
+        extension-critical(string), // OID must be marked critical
+        
+        /// Validity requirements
+        valid-after(u64), // Unix timestamp
+        valid-before(u64), // Unix timestamp
+        max-validity-period-days(u32),
+        
+        /// Key requirements
+        key-usage-includes(list<key-usage-flag>),
+        extended-key-usage-includes(list<string>), // OIDs
+        min-key-size-bits(u32),
+        
+        /// Certificate Transparency
+        require-sct-count(u8), // Minimum SCT count
+        require-ct-log-inclusion(list<string>), // Required log URLs
+        
+        /// Certificate pinning
+        pin-certificate-fingerprint(list<u8>), // SHA-256 of cert
+        pin-public-key-fingerprint(list<u8>), // SHA-256 of SPKI
+        pin-ca-fingerprint(list<u8>), // SHA-256 of issuer cert
+    }
+    
+    enum key-usage-flag {
+        digital-signature,
+        key-encipherment,
+        key-agreement,
+        certificate-signing,
+        crl-signing,
+        content-commitment,
+        data-encipherment,
+        key-cert-sign,
+        crl-sign,
+        encipher-only,
+        decipher-only,
+    }
+    
+    record validation-result {
+        trusted: bool,
+        rules-passed: u32,
+        rules-failed: u32,
+        bypass-used: bool,
+        validation-time-ms: u32, // Always normalized
+    }
+    
+    variant validation-error {
+        rule-failed(validation-rule),
+        certificate-malformed,
+        timeout,
+        resource-exhausted,
+    }
+    
+    /// Certificate validator builder (declarative, timing-safe)
+    @unstable(feature = tls)
+    resource certificate-validator {
+        /// Add validation rules (declarative, no timing leaks)
+        @unstable(feature = tls)
+        add-rule: func(rule: validation-rule) -> result<_, public-error-code>;
+        
+        /// Set emergency bypass token (for operational emergencies)
+        @unstable(feature = tls)
+        set-bypass-token: func(token: string, max-age-seconds: u32) -> result<_, public-error-code>;
+        
+        /// Validate certificate against all rules
+        @unstable(feature = tls)
+        validate: func(cert: borrow<certificate>) -> result<validation-result, validation-error>;
+    }
+    
+    // === ENHANCED CERTIFICATE RESOURCE ===
+    
+    record certificate-extension {
+        oid: string,
+        critical: bool,
+        /// Parsed values only (no raw ASN.1)
+        value: extension-value,
+    }
+    
+    variant extension-value {
+        utf8-string(string),
+        integer(s64),
+        boolean(bool),
+        bytes(list<u8>), // Only for well-known extensions
+        key-usage(list<key-usage-flag>),
+        extended-key-usage(list<string>), // OIDs
+        subject-alt-names(list<string>),
+    }
+    
+    record signed-certificate-timestamp {
+        version: u8,
+        log-id: list<u8>,
+        timestamp: u64,
+        signature: list<u8>,
+    }
+    
+    record ct-log-inclusion {
+        log-url: string,
+        inclusion-verified: bool,
+        merkle-tree-size: u64,
+    }
+    
+    /// Enhanced X.509 certificate with security features
+    @unstable(feature = tls)
+    resource certificate {
+        /// Host-validated trust status
+        @unstable(feature = tls)
+        is-trusted-by-host: func() -> bool;
+        
+        /// Safe extension access (parsed by host)
+        @unstable(feature = tls)
+        get-extensions: func() -> list<certificate-extension>;
+        
+        /// Certificate fingerprints
+        @unstable(feature = tls)
+        get-fingerprint-sha256: func() -> list<u8>;
+        
+        @unstable(feature = tls)
+        get-public-key-fingerprint: func() -> list<u8>;
+        
+        /// Subject/issuer information
+        @unstable(feature = tls)
+        get-subject-dn: func() -> string;
+        
+        @unstable(feature = tls)
+        get-issuer-dn: func() -> string;
+        
+        @unstable(feature = tls)
+        get-serial-number: func() -> list<u8>;
+        
+        /// Validity period
+        @unstable(feature = tls)
+        get-not-before: func() -> u64; // Unix timestamp
+        
+        @unstable(feature = tls)
+        get-not-after: func() -> u64;  // Unix timestamp
+        
+        /// Certificate Transparency information
+        @unstable(feature = tls)
+        get-scts: func() -> list<signed-certificate-timestamp>;
+        
+        @unstable(feature = tls)
+        get-ct-log-inclusion: func() -> list<ct-log-inclusion>;
+        
+        /// Hostname verification (timing-safe)
+        @unstable(feature = tls)
+        verify-hostname: func(hostname: server-name) -> bool;
+        
+        /// Export as DER for persistence/comparison
+        @unstable(feature = tls)
+        export-der: func() -> list<u8>;
+    }
+    
+    // === CONNECTION WITH SECURITY FEATURES ===
+    
+    record connection-algorithms {
+        key-exchange: string,        // "x25519", "kyber768", "x25519+kyber768"
+        signature: string,           // "ecdsa_secp256r1_sha256", "dilithium3"  
+        symmetric-cipher: string,    // "aes_128_gcm", "chacha20_poly1305"
+        hash: string,               // "sha256", "sha384"
+    }
+    
+    /// Enhanced active TLS connection
+    @unstable(feature = tls)
+    resource connection {
+        /// Get negotiated protocol version (always 0x0304 for TLS 1.3)
+        @unstable(feature = tls)
+        protocol-version: func() -> protocol-version;
+        
+        /// Get negotiated cipher suite
+        @unstable(feature = tls)
+        cipher-suite: func() -> extended-cipher-suite;
+        
+        /// Get cryptographic strength of established connection
+        @unstable(feature = tls)
+        crypto-strength: func() -> crypto-strength;
+        
+        /// Check if connection provides quantum resistance
+        @unstable(feature = tls)
+        is-quantum-safe: func() -> bool;
+        
+        /// Get detailed algorithm information for auditing
+        @unstable(feature = tls)
+        get-algorithms: func() -> connection-algorithms;
+        
+        /// Get peer certificate (if any)
+        @unstable(feature = tls)
+        peer-certificate: func() -> option<certificate>;
+        
+        /// Get negotiated ALPN protocol
+        @unstable(feature = tls)
+        alpn-protocol: func() -> option<alpn-protocol>;
+        
+        /// Configure traffic analysis protection
+        @unstable(feature = tls)
+        set-traffic-protection: func(policy: traffic-protection-policy) -> result<_, public-error-code>;
+        
+        /// Get current protection status
+        @unstable(feature = tls)
+        get-protection-status: func() -> traffic-protection-status;
+        
+        /// Send close_notify alert
+        @unstable(feature = tls)
+        close: func() -> result<_, public-error-code>;
+    }
+    
+    // === TIMING-PROTECTED ASYNC OPERATIONS ===
+    
+    enum poll-result {
+        ready,      // Operation completed
+        pending,    // Still in progress
+        timeout,    // Exceeded timeout
+    }
+    
+    /// Pollable with timing normalization
+    @unstable(feature = tls)
+    resource protected-pollable {
+        /// Poll with consistent timing regardless of actual state
+        @unstable(feature = tls)
+        poll: func() -> poll-result;
+        
+        /// Set maximum wait time (prevents DoS)
+        @unstable(feature = tls)
+        set-timeout: func(timeout-ms: u32) -> result<_, public-error-code>;
+    }
+    
+    /// Async operation with timing protection
+    @unstable(feature = tls)
+    resource protected-future-client-streams {
+        /// Subscribe with timing protection
+        @unstable(feature = tls)
+        subscribe-with-protection: func() -> protected-pollable;
+        
+        /// Get result with normalized timing
+        @unstable(feature = tls)
+        get-result: func() -> result<client-result, public-error-code>;
+        
+        /// Check completion status without timing leaks
+        @unstable(feature = tls)
+        is-ready: func() -> bool; // Always takes same time
+    }
+    
+    // === ENHANCED CLIENT WITH SECURITY FEATURES ===
+    
+    /// Result of successful client handshake
+    @unstable(feature = tls)
+    record client-result {
+        /// The established connection
+        connection: connection,
+        /// Decrypted input stream (plaintext from server)
+        input: input-stream,
+        /// Encrypted output stream (plaintext to server)
+        output: output-stream,
+    }
+    
+    /// Enhanced client TLS connection establishment
+    @unstable(feature = tls)
+    resource client {
+        /// Create a new client connection with basic security
+        @unstable(feature = tls)
+        new: static func(
+            /// Server hostname for SNI and certificate verification
+            server-name: server-name,
+            /// Transport input stream (ciphertext in)
+            transport-input: input-stream,
+            /// Transport output stream (ciphertext out)
+            transport-output: output-stream,
+        ) -> result<client, public-error-code>;
+        
+        /// Create client with component isolation
+        @unstable(feature = tls)
+        new-with-isolation: static func(
+            server-name: server-name,
+            transport-input: input-stream,
+            transport-output: output-stream,
+            isolation-policy: component-isolation-policy,
+        ) -> result<client, public-error-code>;
+        
+        /// Set ALPN protocols in preference order
+        @unstable(feature = tls)
+        set-alpn-protocols: func(protocols: list<alpn-protocol>) -> result<_, public-error-code>;
+        
+        /// Set client certificate for mutual TLS (optional)
+        @unstable(feature = tls)
+        set-identity: func(identity: borrow<private-identity>) -> result<_, public-error-code>;
+        
+        /// Set custom certificate validator
+        @unstable(feature = tls)
+        set-certificate-validator: func(validator: borrow<certificate-validator>) -> result<_, public-error-code>;
+        
+        /// Set handshake timeout (prevents hanging)
+        @unstable(feature = tls)
+        set-handshake-timeout: func(timeout-ms: u32) -> result<_, public-error-code>;
+        
+        /// Complete handshake and get connection + streams
+        @unstable(feature = tls)
+        finish: func() -> result<client-result, public-error-code>;
+        
+        /// Finish handshake with timing protection
+        @unstable(feature = tls)
+        finish-with-protection: func() -> protected-future-client-streams;
+        
+        /// Get pollable for async handshake
+        @unstable(feature = tls)
+        subscribe: func() -> pollable;
+    }
+    
+    // === PRIVATE IDENTITY (UNCHANGED) ===
+    
+    /// Private identity - certificate with private key (non-exportable)
+    @unstable(feature = tls)
+    resource private-identity {
+        /// Get the associated certificate
+        @unstable(feature = tls)
+        certificate: func() -> certificate;
+    }
+    
+    // === SERVER SUPPORT (ENHANCED) ===
+    
+    /// Result of successful server handshake
+    @unstable(feature = tls)
+    record server-result {
+        /// The established connection
+        connection: connection,
+        /// Decrypted input stream (plaintext from client)
+        input: input-stream,
+        /// Encrypted output stream (plaintext to client)
+        output: output-stream,
+    }
+    
+    /// Enhanced server TLS connection acceptance
+    @unstable(feature = tls)
+    resource server {
+        /// Create a new server connection
+        @unstable(feature = tls)
+        new: static func(
+            /// Transport input stream (ciphertext in)
+            transport-input: input-stream,
+            /// Transport output stream (ciphertext out)
+            transport-output: output-stream,
+        ) -> result<server, public-error-code>;
+        
+        /// Create server with component isolation
+        @unstable(feature = tls)
+        new-with-isolation: static func(
+            transport-input: input-stream,
+            transport-output: output-stream,
+            isolation-policy: component-isolation-policy,
+        ) -> result<server, public-error-code>;
+        
+        /// Set server identity (MUST be called before finish)
+        @unstable(feature = tls)
+        set-identity: func(identity: borrow<private-identity>) -> result<_, public-error-code>;
+        
+        /// Set supported ALPN protocols
+        @unstable(feature = tls)
+        set-alpn-protocols: func(protocols: list<alpn-protocol>) -> result<_, public-error-code>;
+        
+        /// Require client certificate (mutual TLS)
+        @unstable(feature = tls)
+        set-client-auth-required: func(required: bool) -> result<_, public-error-code>;
+        
+        /// Set custom certificate validator for client certificates
+        @unstable(feature = tls)
+        set-client-certificate-validator: func(validator: borrow<certificate-validator>) -> result<_, public-error-code>;
+        
+        /// Set handshake timeout
+        @unstable(feature = tls)
+        set-handshake-timeout: func(timeout-ms: u32) -> result<_, public-error-code>;
+        
+        /// Complete handshake and get connection + streams
+        @unstable(feature = tls)
+        finish: func() -> result<server-result, public-error-code>;
+        
+        /// Get pollable for async handshake
+        @unstable(feature = tls)
+        subscribe: func() -> pollable;
+    }
+    
+    // === CERTIFICATE MANAGEMENT (ENHANCED) ===
+    
+    /// Import a private identity from PEM
+    /// WARNING: This should only be used in development/testing
+    /// Production systems should use preopened identities for security
+    @unstable(feature = tls)
+    import-identity: func(
+        cert-pem: string,
+        key-pem: string
+    ) -> result<private-identity, public-error-code>;
+    
+    /// Import a certificate from PEM
+    @unstable(feature = tls)
+    import-certificate: func(cert-pem: string) -> result<certificate, public-error-code>;
+    
+    /// Get default trusted root certificates
+    /// These should be the standard CA certificates trusted by the host
+    @unstable(feature = tls)
+    get-default-roots: func() -> list<certificate>;
+    
+    /// Create a certificate validator
+    @unstable(feature = tls)
+    create-certificate-validator: func() -> certificate-validator;
+    
+    /// Create a resource manager
+    @unstable(feature = tls)
+    create-resource-manager: func() -> resource-manager;
+}

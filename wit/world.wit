@@ -1,7 +1,19 @@
-package wasi:tls@0.2.0-draft;
+package wasi:tls@0.1.0;
 
+/// Minimal world for TLS applications with Hardware-Accelerated Crypto Component (HACC) support
+/// 
+/// This world provides access to:
+/// - TLS 1.3 protocol operations with hardware-accelerated cryptography
+/// - Post-quantum cryptography readiness
+/// - Hardware isolation and attestation capabilities
+/// - Side-channel attack resistance through hardware components
 @unstable(feature = tls)
-world imports {
+world tls-world {
+    import wasi:io/poll@0.2.0;
+    import wasi:io/streams@0.2.0;
+    import wasi:sockets/tcp@0.2.0;
+    import wasi:sockets/network@0.2.0;
+    
     @unstable(feature = tls)
-    import types;
+    import tls;
 }

@@ -1,3 +1,5 @@
+# WASI-TLS Project .gitignore
+
 # Generated files from wit-bindgen and wasm-tools
 *.wasm
 *.wat
@@ -14,6 +16,8 @@ wit/deps.lock
 target/
 build/
 dist/
+**/*.rs.bk
+Cargo.lock
 
 # Editor and IDE files
 .vscode/
@@ -24,15 +28,138 @@ dist/
 
 # OS files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
 # Temporary files
 *.tmp
 *.temp
 .cache/
+tmp/
+temp/
 
 # Logs
 *.log
+*.report
+*.json.gz
 
-# Claude Code files
+# ========================================
+# SECURITY AND VULNERABILITY TESTING
+# ========================================
+
+# PRIVATE: Vulnerability research and exploitation tools
+# These directories contain security research tools that should NOT be public
+test/private/
+test/vulnerability-research/
+test/exploit-tools/
+test/attack-payloads/
+test/penetration-testing/
+vulnerability-research/
+exploit-development/
+private-security/
+
+# PRIVATE: Security research artifacts
+security-research/
+penetration-reports/
+exploit-database/
+vulnerability-scanner-output/
+attack-simulation-results/
+
+# PRIVATE: Fuzzing corpus and crash files
+# Fuzzing results may contain exploitable crashes
+test/fuzzing-corpus/
+test/crash-files/
+test/hang-files/
+fuzzing-results/
+afl-output/
+libfuzzer-output/
+crashes/
+hangs/
+
+# PRIVATE: Security test certificates and keys
+# Even test keys should not be accidentally committed
+test/fixtures/private-keys/
+test/fixtures/certificates/sensitive/
+test/fixtures/malicious-payloads/
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# PRIVATE: Attack pattern databases
+attack-patterns/
+exploit-payloads/
+malware-samples/
+vulnerability-test-cases/
+
+# ========================================
+# PUBLIC: Safe testing artifacts (allowed)
+# ========================================
+
+# Allow public security validation tools
+!test/implementations/
+!test/security-validation/
+!test/compliance-testing/
+!test/defensive-testing/
+
+# Allow basic test fixtures (clearly marked as test-only)
+!test/fixtures/public/
+!test/fixtures/test-certificates/
+!test/fixtures/README.md
+
+# Allow CI/CD security validation
+!.github/workflows/security-validation.yml
+!.github/workflows/main.yml
+
+# ========================================
+# DEVELOPMENT
+# ========================================
+
+# Local development configuration
+.env
+.env.local
+config.local.*
+
+# Test outputs and artifacts
+test-results/
+coverage-reports/
+performance-reports/
+security-reports/*.json
+security-reports/*.html
+
+# Package manager
+node_modules/
+package-lock.json
+yarn.lock
+
+# Python (if used for tooling)
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+venv/
+env/
+
+# Tool-specific ignores
+.cargo/config
+rustfmt.toml.bak
+
+# Backup files
+*.bak
+*.orig
+*.rej
+
+# Claude Code files (keep this to preserve user instructions)
 CLAUDE.md
+
+# ========================================
+# DOCUMENTATION (PRIVATE FOR NOW)
+# ========================================
+
+# Security documentation - keeping private during development
+docs/

@@ -1,0 +1,12 @@
+# Dependencies for the logging component example
+# Copy the WASI-TLS WIT files into your project or reference them directly
+
+# Option 1: Use wasi-tls as a git dependency (recommended for production)
+# tls = "git+https://github.com/WebAssembly/wasi-tls#main"
+
+# Option 2: Use local path during development
+tls = { path = "../../../wit" }
+
+# Standard WASI dependencies
+io = "https://github.com/WebAssembly/wasi-io/archive/v0.2.0.tar.gz"
+sockets = "https://github.com/WebAssembly/wasi-sockets/archive/v0.2.0.tar.gz"

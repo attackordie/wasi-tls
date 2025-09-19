@@ -1,0 +1,73 @@
+[package]
+name = "wasi-tls-host-testing"
+version = "0.1.0"
+edition = "2021"
+description = "Host-side testing for WASI-TLS with full system access"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "wasi_tls_host_testing"
+path = "src/lib.rs"
+
+[[bin]]
+name = "host-test-runner"
+path = "src/bin/host_test_runner.rs"
+
+[dependencies]
+# Core testing infrastructure with system access
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+clap = { version = "4.0", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Async runtime and network access (HOST ONLY)
+tokio = { version = "1.0", features = ["full"] }
+tokio-rustls = "0.25"
+futures = "0.3"
+
+# Real TLS implementation for comparison (HOST ONLY)
+rustls = "0.22"
+rustls-pemfile = "2.0"
+webpki-roots = "0.25"
+
+# Real certificate and crypto operations (HOST ONLY)
+rcgen = "0.12"
+x509-parser = "0.15"
+ring = "0.17"
+
+# Network testing utilities (HOST ONLY)
+tokio-test = "0.4"
+tempfile = "3.0"
+
+# WASM runtime for testing components (HOST ONLY)
+wasmtime = "24.0"
+wasm-tools = "1.224.0"
+wit-bindgen = "0.38.0"
+
+# Load testing and stress testing (HOST ONLY)
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Property-based testing with full system access
+proptest = "1.0"
+quickcheck = "1.0"
+
+[dev-dependencies]
+hex = "0.4"
+
+[workspace]
+members = ["integration", "compliance", "security"]
+
+[features]
+default = ["integration", "compliance", "security"]
+integration = []     # Full-stack integration testing
+compliance = []      # RFC 8446 compliance with real TLS
+security = []        # Host-side security validation
+load-testing = []    # Performance and load testing
+chaos-testing = []   # Chaos engineering tests
+
+[[bench]]
+name = "host_performance"
+harness = false

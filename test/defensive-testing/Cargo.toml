@@ -1,0 +1,51 @@
+[package]
+name = "wasi-tls-defensive-testing"
+version = "0.1.0"
+edition = "2021"
+description = "Defensive security testing for WASI-TLS - input validation and boundary testing"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "wasi_tls_defensive_testing"
+path = "src/lib.rs"
+
+[[bin]]
+name = "defensive-test"
+path = "src/bin/defensive_test.rs"
+
+[dependencies]
+# Core testing framework
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+clap = { version = "4.0", features = ["derive"] }
+tokio = { version = "1.0", features = ["full"] }
+
+# Input validation and boundary testing
+proptest = "1.0"           # Property-based testing
+quickcheck = "1.0"         # QuickCheck property testing
+arbitrary = "1.3"          # Arbitrary data generation
+fake = "2.9"              # Fake data generation
+
+# Safe certificate and crypto testing
+rcgen = "0.12"             # Certificate generation
+x509-parser = "0.15"       # Certificate parsing
+ring = "0.17"              # Safe cryptographic operations
+
+# WASM testing infrastructure
+wasmtime = "24.0"
+wit-bindgen = "0.38.0"
+wasi = "0.14.0"
+
+[dev-dependencies]
+tempfile = "3.0"
+tokio-test = "0.4"
+
+[features]
+default = ["boundary-testing", "input-validation"]
+boundary-testing = []      # Boundary condition testing
+input-validation = []      # Input sanitization testing
+property-testing = []      # Property-based testing
+stress-testing = []        # Stress testing under load

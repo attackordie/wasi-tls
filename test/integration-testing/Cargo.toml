@@ -1,0 +1,55 @@
+[package]
+name = "wasi-tls-integration-testing"
+version = "0.1.0"
+edition = "2021"
+description = "Full-stack integration testing for WASI-TLS implementations"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "wasi_tls_integration_testing"
+path = "src/lib.rs"
+
+[[bin]]
+name = "integration-test"
+path = "src/bin/integration_test.rs"
+
+[dependencies]
+# Core testing infrastructure
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+clap = { version = "4.0", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+tokio = { version = "1.0", features = ["full"] }
+
+# WASM/WASI testing
+wasmtime = "24.0"
+wasi = "0.14.0"
+wit-bindgen = "0.38.0"
+wasm-tools = "1.224.0"
+cargo-component = "0.15.0"
+
+# Real network testing
+tokio-rustls = "0.25"
+rustls = "0.22"
+rustls-pemfile = "2.0"
+webpki-roots = "0.25"
+rcgen = "0.12"
+x509-parser = "0.15"
+
+# Error injection and fault testing
+chaos = "0.4"
+proptest = "1.0"
+
+[dev-dependencies]
+tempfile = "3.0"
+tokio-test = "0.4"
+
+[features]
+default = ["integration", "fault-testing"]
+integration = []       # Full-stack integration tests
+fault-testing = []     # Network and error injection testing
+load-testing = []      # Performance and load testing
+chaos-testing = []     # Chaos engineering tests

@@ -1,400 +1,415 @@
-# Testing Guidelines for WASI-TLS
+# WASI-TLS Testing Framework
 
-## Overview
+## 🛡️ Security-First Testing Architecture
 
-This document outlines the comprehensive testing strategy for the WASI-TLS proposal, ensuring that **WIT files are the single source of truth** for all testing targets. All tests must originate from and validate against the latest WIT interface definitions in `wit/types.wit`.
+This document outlines the comprehensive testing strategy for the WASI-TLS proposal, with a focus on **responsible security testing** that validates security requirements while avoiding the creation of tools that could be misused against other projects.
 
-## Testing Architecture
+### Core Principles
 
-### WIT-Driven Testing Principles
+1. **WIT-Driven Testing**: All tests originate from and validate against `wit/types.wit`
+2. **Security-First Design**: Validate TLS 1.3 security constraints through interface design
+3. **Defensive Testing**: Focus on validation that security requirements are met
+4. **Responsible Research**: Separate public defensive testing from private vulnerability research
 
-1. **Single Source of Truth**: All test targets MUST be generated from `wit/types.wit`
-2. **Version Validation**: Tests MUST verify they're using current WIT definitions (not stale targets)
-3. **Interface Compliance**: All implementations MUST satisfy the complete WIT interface contract
-4. **Security-First**: All tests MUST validate TLS 1.3-only security constraints
-
-### Test Hierarchy
+## 📁 Testing Directory Structure
 
 ```
 test/
-├── README.md              # This file
-├── wit-validation/        # WIT consistency and generation tests
-├── unit/                  # Component unit tests
-├── integration/          # Full end-to-end integration tests
-├── implementations/      # Per-language implementation tests
-│   ├── rust/             # Rust/WASM testing
-│   ├── go/               # Go implementation tests (future)
-│   ├── c/                # C implementation tests (future)
-│   └── js/               # JavaScript implementation tests (future)
-├── security/             # TLS 1.3 security compliance tests
-├── fixtures/             # Test certificates, keys, and data
-└── tools/                # Testing utilities and scripts
+├── README.md                    # This file
+├── host-testing/               # 🔓 PUBLIC: Host-side testing (full system access)
+│   ├── src/
+│   │   ├── integration/        # End-to-end network testing
+│   │   ├── compliance/         # RFC 8446 compliance with real TLS stacks
+│   │   └── security/          # Host-side security validation
+│   ├── Cargo.toml             # Full dependencies (tokio, rustls, etc.)
+│   └── benches/               # Performance benchmarking
+├── component-testing/          # 🔓 PUBLIC: WASM component testing (no system calls)
+│   ├── src/
+│   │   ├── wit-validation/     # Pure WIT interface logic validation
+│   │   ├── unit-tests/        # Component behavior testing
+│   │   └── input-validation/  # Safe input boundary testing
+│   ├── Cargo.toml             # WASM-compatible dependencies only
+│   └── wasm-tests/            # WASM-specific test targets
+├── fixtures/                   # 🔓 PUBLIC: Test certificates (marked TEST-ONLY)
+│   ├── public/                # Safe test data (both host and component)
+│   └── README.md              # Security guidelines for test data
+└── private/                    # 🔒 PRIVATE: Vulnerability research (gitignored)
+    ├── README.md              # Security research guidelines
+    ├── fuzzing/               # Advanced fuzzing tools (host-side only)
+    ├── exploit-tools/         # Vulnerability research utilities
+    └── attack-payloads/       # Malicious test inputs
 ```
 
-## Core Testing Requirements
+### 🖥️ Host-Side Testing (`/test/host-testing/`)
 
-### 1. WIT Interface Validation
+**Environment**: Development machines, CI/CD servers, full system access
 
-**Location**: `test/wit-validation/`
+**Capabilities**:
+- ✅ System calls (network, filesystem, threads)
+- ✅ Async runtimes (tokio, async-std)
+- ✅ Real TLS implementations (rustls, openssl)
+- ✅ Performance benchmarking and profiling
+- ✅ Integration with external services
 
-- **WIT Consistency**: Verify all WIT files are syntactically correct
-- **Dependency Integrity**: Validate WASI I/O dependencies are correct versions
-- **Target Freshness**: Ensure generated bindings match current WIT definitions
-- **ABI Compatibility**: Validate ABI stability across WIT changes
+**Dependencies**: tokio, rustls, wasmtime, criterion, tempfile
 
-**Tools Required**:
-- `wit-bindgen` (exact version specified in CI)
-- `wasm-tools` 
-- Custom freshness validation scripts
+### 🔒 Component Testing (`/test/component-testing/`)
 
-### 2. TLS 1.3 Protocol Compliance
+**Environment**: WASM isolates (V8, wasmtime, browser)
 
-**Location**: `test/security/`
+**Capabilities**:
+- ❌ No system calls
+- ❌ No async runtimes  
+- ❌ No filesystem access
+- ❌ No network access
+- ✅ Pure computational logic
+- ✅ WASI-provided interfaces only
 
-All tests MUST validate the security-first design principles:
+**Dependencies**: wit-bindgen, wasi, pure Rust crates (no_std compatible)
 
-#### Mandatory Protocol Requirements
-- **TLS 1.3 Only**: Protocol version 0x0304 exclusively
-- **Cipher Suites**: Support for mandatory RFC 8446 suites
-  - `TLS_AES_128_GCM_SHA256` (0x1301) - MUST implement
-  - `TLS_AES_256_GCM_SHA384` (0x1302) - SHOULD implement  
-  - `TLS_CHACHA20_POLY1305_SHA256` (0x1303) - SHOULD implement
-- **Named Groups**: Key exchange validation
-  - `secp256r1` (0x0017) - MUST implement
-  - `x25519` (0x001d) - SHOULD implement
-- **Signature Schemes**: Certificate signature validation
-  - `rsa_pss_rsae_sha256` (0x0804) - MUST implement
+**🚨 IMPORTANT**: The `/test/private/` directory is gitignored and should NEVER be committed to public repositories. It contains vulnerability research tools that could be misused.
 
-#### Security Constraint Validation
-- **NO TLS 1.2**: Reject any TLS 1.2 handshake attempts
-- **NO 0-RTT**: Verify 0-RTT data is never accepted
-- **NO Session Resumption**: Verify no session tickets are used
-- **Certificate Validation**: Hostname verification, expiration, trust chain
+## 🔓 Public Security Validation
 
-### 3. Rust/WASM Integration Tests
+### 1. WIT Interface Security Validation
 
-**Location**: `test/implementations/rust/`
+**Location**: `test/security-validation/src/wit_validation.rs`
 
-#### Test Structure
-```
-rust/
-├── Cargo.toml           # Test workspace configuration
-├── src/
-│   ├── lib.rs          # Common test utilities
-│   ├── wit_bindings/   # Generated from wit/types.wit (auto-generated)
-│   └── fixtures/       # Test certificates and keys
-├── tests/
-│   ├── client_tests.rs # Client handshake and connection tests
-│   ├── server_tests.rs # Server acceptance and connection tests
-│   ├── certificate_tests.rs # Certificate resource tests
-│   ├── error_tests.rs  # Error handling validation
-│   └── security_tests.rs # TLS 1.3 security compliance
-└── examples/
-    ├── simple_client.rs
-    ├── simple_server.rs
-    └── mutual_tls.rs
-```
+**Purpose**: Validates that the WIT interface design prevents common TLS vulnerabilities through interface constraints.
 
-#### Client Resource Tests (`client_tests.rs`)
-
-Test all client resource methods from `wit/types.wit`:
+**Key Validations**:
+- **TLS 1.3 Only Constraint**: Ensures interface only supports TLS 1.3 (0x0304)
+- **No 0-RTT Support**: Validates 0-RTT is prohibited (prevents replay attacks)
+- **No Session Resumption**: Ensures session resumption is not supported (maintains forward secrecy)
+- **Mandatory Certificate Validation**: Verifies hostname verification and certificate validation are required
+- **Comprehensive Error Handling**: Validates all security-relevant error conditions are covered
 
 ```rust
-// Test matrix for client::new() - lines 135-142
-#[test] fn test_client_new_valid_hostname()
-#[test] fn test_client_new_invalid_streams() 
-#[test] fn test_client_new_connection_refused()
-
-// Test client::set-alpn-protocols() - lines 147
-#[test] fn test_set_alpn_single_protocol()
-#[test] fn test_set_alpn_multiple_protocols()
-#[test] fn test_set_alpn_empty_list()
-
-// Test client::set-identity() - lines 150
-#[test] fn test_set_client_identity_valid()
-#[test] fn test_set_client_identity_invalid()
-
-// Test client::finish() - lines 155
-#[test] fn test_client_finish_successful_handshake()
-#[test] fn test_client_finish_handshake_failure()
-#[test] fn test_client_finish_certificate_invalid()
-
-// Test client::subscribe() - lines 158
-#[test] fn test_client_subscribe_pollable()
+// Example: Real WIT interface security validation
+#[test]
+fn test_tls13_only_constraint() {
+    let wit_content = read_wit_types_file()?;
+    assert!(wit_content.contains("0x0304"));      // TLS 1.3
+    assert!(!wit_content.contains("0x0303"));     // No TLS 1.2
+}
 ```
 
-#### Server Resource Tests (`server_tests.rs`)
+### 2. TLS 1.3 RFC 8446 Compliance Testing
 
-Test all server resource methods from `wit/types.wit`:
+**Location**: `test/security-validation/src/tls_compliance.rs`
 
-```rust  
-// Test matrix for server::new() - lines 180-185
-#[test] fn test_server_new_valid_streams()
-#[test] fn test_server_new_invalid_streams()
+**Purpose**: Real-world validation of TLS 1.3 compliance using actual certificates and cryptographic validation.
 
-// Test server::set-identity() - lines 189
-#[test] fn test_server_set_identity_required()
-#[test] fn test_server_set_identity_invalid_cert()
-
-// Test server::set-alpn-protocols() - lines 193
-#[test] fn test_server_set_alpn_protocols()
-
-// Test server::set-client-auth-required() - lines 197
-#[test] fn test_server_require_client_auth()
-#[test] fn test_server_optional_client_auth()
-
-// Test server::finish() - lines 202
-#[test] fn test_server_finish_successful_handshake()
-#[test] fn test_server_finish_no_identity_error()
-```
-
-#### Connection Resource Tests (`connection_tests.rs`)
-
-Test all connection methods from `wit/types.wit:104-126`:
+**Key Features**:
+- **Real Certificate Generation**: Uses `rcgen` to create actual test certificates
+- **Actual Certificate Parsing**: Uses `x509-parser` for real X.509 validation
+- **Cryptographic Security Validation**: Tests cipher suites, key exchange groups, signature algorithms
+- **Protocol Security Testing**: Validates forbidden legacy features are disabled
 
 ```rust
-// Test connection inspection methods
-#[test] fn test_connection_protocol_version() // line 108
-#[test] fn test_connection_cipher_suite()     // line 112  
-#[test] fn test_connection_peer_certificate() // line 116
-#[test] fn test_connection_alpn_protocol()    // line 120
-#[test] fn test_connection_close()            // line 124
+// Example: Real-world certificate security validation
+let certificates = generate_test_certificates()?;
+for (cert_type, cert_der) in certificates {
+    match parse_der_certificate(&cert_der) {
+        Ok((_, cert)) => {
+            let issues = validate_certificate_security(&cert, &cert_type);
+            // Real security validation against RFC 8446 requirements
+        }
+    }
+}
 ```
 
-#### Certificate Resource Tests (`certificate_tests.rs`)
+**Compliance Areas Tested**:
+- **Mandatory Cipher Suites**: `TLS_AES_128_GCM_SHA256` (0x1301) - MUST implement
+- **Key Exchange Groups**: `secp256r1` (0x0017) - MUST implement, `x25519` (0x001d) - SHOULD implement
+- **Signature Schemes**: `rsa_pss_rsae_sha256` (0x0804) - MUST implement
+- **AEAD Requirement**: All cipher suites must be AEAD (no CBC, RC4, NULL)
+- **Perfect Forward Secrecy**: Ephemeral key exchange validation
+- **Forbidden Legacy Features**: Renegotiation, compression, export ciphers disabled
 
-Test certificate resource methods from `wit/types.wit:78-94`:
+### 3. Certificate Security Validation
 
-```rust
-#[test] fn test_certificate_subject()         // line 81
-#[test] fn test_certificate_issuer()          // line 84
-#[test] fn test_certificate_verify_hostname() // line 88
-#[test] fn test_certificate_export_der()      // line 92
-```
+**Location**: `test/security-validation/src/certificate_validation.rs`
 
-#### Error Handling Tests (`error_tests.rs`)
+**Purpose**: Validates certificate handling security using real X.509 certificates.
 
-Test all error-code variants from `wit/types.wit:53-74`:
+**Real-World Testing**:
+- **Certificate Generation**: Creates actual RSA and ECDSA certificates with different parameters
+- **Security Validation**: Tests key sizes, signature algorithms, validity periods
+- **Negative Testing**: Validates rejection of weak, expired, or malformed certificates
+- **Chain Validation**: Tests certificate chain validation and trust establishment
 
-```rust
-// Connection errors
-#[test] fn test_connection_refused_error()
-#[test] fn test_connection_reset_error()
-#[test] fn test_connection_timeout_error()
+## 🔒 Private Security Research (Gitignored)
 
-// TLS protocol errors  
-#[test] fn test_protocol_violation_error()
-#[test] fn test_handshake_failure_error()
-#[test] fn test_certificate_invalid_error()
-#[test] fn test_certificate_expired_error()
-#[test] fn test_certificate_untrusted_error()
+**⚠️ WARNING**: The `/test/private/` directory contains vulnerability research tools and should NEVER be committed to public repositories.
 
-// Configuration errors
-#[test] fn test_unsupported_protocol_version_error()
-#[test] fn test_no_common_cipher_suite_error()
-#[test] fn test_no_common_signature_algorithm_error()
+### Purpose
 
-// Operational errors
-#[test] fn test_would_block_error()
-#[test] fn test_internal_error()
-```
+- **Advanced Fuzzing**: Tools designed to find crashes and memory corruption
+- **Exploit Development**: Proof-of-concept exploit code and attack utilities
+- **Vulnerability Research**: Private security research findings and methodologies
+- **Attack Simulation**: Tools for simulating real-world attacks
 
-#### Security Compliance Tests (`security_tests.rs`)
+### Access Control
 
-Critical security validation tests:
+- **Private Repositories Only**: Use separate private repos for vulnerability research
+- **Security Team Access**: Limit access to authorized security researchers only
+- **Responsible Disclosure**: Follow coordinated vulnerability disclosure practices
 
-```rust
-// TLS 1.3 only validation
-#[test] fn test_tls12_rejected()
-#[test] fn test_tls11_rejected()  
-#[test] fn test_only_tls13_accepted()
+### Guidelines
 
-// Cipher suite compliance
-#[test] fn test_mandatory_cipher_aes128_gcm()
-#[test] fn test_recommended_cipher_aes256_gcm()
-#[test] fn test_recommended_cipher_chacha20()
-#[test] fn test_weak_ciphers_rejected()
+See `/test/private/README.md` and `SECURITY-DEVELOPMENT.md` for comprehensive guidelines on:
+- Responsible vulnerability research
+- Legal and ethical considerations
+- Emergency incident response procedures
+- Vulnerability disclosure timelines
 
-// Key exchange validation
-#[test] fn test_secp256r1_supported()
-#[test] fn test_x25519_supported()
-#[test] fn test_weak_groups_rejected()
+## 🛠️ Development Workflow
 
-// Certificate validation
-#[test] fn test_hostname_verification()
-#[test] fn test_certificate_expiration()
-#[test] fn test_certificate_chain_validation()
-#[test] fn test_self_signed_rejected()
-```
-
-### 4. WASM Target Testing
-
-#### WASM Build Validation
-- **Component Model**: Validate WASM components correctly implement WIT interfaces
-- **Host Integration**: Test WASM targets correctly call host TLS implementations
-- **Stream Integration**: Verify WASI I/O stream integration works correctly
-- **Memory Safety**: Validate no memory corruption in WASM/host boundary
-
-#### WASM Runtime Testing
-```bash
-# Build WASM component from Rust
-cargo component build --release
-
-# Validate component exports match WIT
-wasm-tools component wit target/wasm32-wasi/release/wasi_tls_test.wasm
-
-# Test component in WASI runtime
-wasmtime serve --wasi=preview2 target/wasm32-wasi/release/wasi_tls_test.wasm
-```
-
-## Installing the Tools
-
-### Required Tools
+### Prerequisites
 
 ```bash
-# Core WASM/WIT toolchain
-cargo install cargo-component@0.15.0
+# Install Rust toolchain
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Install WASI-TLS testing tools
 cargo install wit-bindgen-cli@0.38.0  
 cargo install wasm-tools@1.224.0
-
-# WASI runtime for testing
-curl https://wasmtime.dev/install.sh -sSf | bash
-
-# TLS testing utilities  
-cargo install rustls-pemfile  # For certificate parsing
-cargo install rcgen          # For test certificate generation
+cargo install cargo-component@0.15.0
 ```
 
-### Development Dependencies
+### Running Public Security Validation
 
-```toml
-# test/implementations/rust/Cargo.toml
-[dependencies]
-wit-bindgen = "0.38.0"
-wasi = "0.13.0"
-anyhow = "1.0"
+#### Host-Side Testing (Full System Access)
 
-[dev-dependencies]
-tokio-test = "0.4"
-rcgen = "0.12"      # Test certificate generation
-rustls-pemfile = "1.0" # PEM parsing for tests
-tempfile = "3.0"    # Temporary files for testing
-```
-
-## Running the Tests
-
-### WIT Validation
 ```bash
-# Validate WIT syntax and dependencies
+# Run comprehensive host-side integration tests
+cd test/host-testing
+cargo run --bin host-test-runner -- --level comprehensive --verbose
+
+# Run specific test categories
+cargo test integration       # End-to-end network testing
+cargo test compliance       # RFC 8446 compliance with real TLS
+cargo test security         # Host-side security validation
+
+# Run performance benchmarks
+cargo bench host_performance
+
+# Generate comprehensive test report
+cargo run --bin host-test-runner -- --output host-test-report.json
+```
+
+#### Component Testing (WASM Isolate)
+
+```bash
+# Run WASM component tests (no system calls)
+cd test/component-testing
+cargo test --target wasm32-wasi-preview2
+
+# Run component tests with wasm-bindgen-test
+wasm-pack test --node
+
+# Run pure logic validation
+cargo run --bin component-test-runner -- --wit-content "$(cat ../../wit/types.wit)"
+
+# Build WASM component for testing
+cargo component build --release
+```
+
+### Testing Commands by Environment
+
+#### Combined Validation Workflow
+
+```bash
+# 1. Validate WIT interface syntax
 wit-bindgen validate wit/
 
-# Check generated bindings are current
-./test/tools/check-bindings-fresh.sh
-```
-
-### Rust/WASM Integration Tests
-```bash
-# Run all Rust implementation tests
-cd test/implementations/rust
-cargo test
-
-# Run specific test suites
-cargo test client_tests
-cargo test server_tests  
-cargo test security_tests
-
-# Build and test WASM components
+# 2. Run WASM component tests (pure logic, no system calls)
+cd test/component-testing
+cargo test --target wasm32-wasi-preview2
 cargo component build --release
-cargo test --target wasm32-wasi
+
+# 3. Run host-side comprehensive testing (full system access)
+cd ../host-testing  
+cargo test --all-features
+cargo run --bin host-test-runner -- --comprehensive
+
+# 4. Cross-environment validation
+cargo run --bin host-test-runner -- --test-components ../component-testing/target/wasm32-wasi-preview2/release/
 ```
 
-### Security Compliance Tests
+#### Environment-Specific Commands
+
+**Host Environment** (Development/CI):
 ```bash
-# Run TLS 1.3 compliance test suite
-cargo test --package security_tests
+cd test/host-testing
 
-# Validate mandatory cipher suites
-cargo test test_mandatory_cipher_aes128_gcm
+# Integration testing with real network
+cargo test integration::test_real_tls_handshake
+cargo test integration::test_concurrent_connections
 
-# Test certificate validation
-cargo test certificate_tests
+# RFC compliance with rustls comparison
+cargo test compliance::test_rfc8446_cipher_suites
+cargo test compliance::test_mandatory_extensions
+
+# Security validation with real certificates
+cargo test security::test_certificate_chain_validation
+cargo test security::test_weak_certificate_rejection
+
+# Load testing and performance
+cargo bench host_performance
+cargo test load_testing --release
 ```
 
-### Full Integration Testing
+**WASM Component Environment** (Isolate):
 ```bash
-# Complete test suite (WIT + Rust + WASM + Security)
-./test/run-all-tests.sh
+cd test/component-testing
 
-# CI validation pipeline
-./test/ci-validate.sh
+# Pure logic WIT validation
+cargo test wit_validation::test_tls13_only_constraint
+cargo test wit_validation::test_security_first_design
+
+# Component unit tests (no system calls)
+cargo test unit_tests::test_component_behavior
+cargo test unit_tests::test_pure_functions
+
+# Input validation (safe boundaries)
+cargo test input_validation::test_boundary_conditions
+cargo test --target wasm32-wasi-preview2 --all-features
 ```
 
-### Continuous Integration
+## 📊 Continuous Security Integration
 
-#### GitHub Actions Integration
+### GitHub Actions Workflow
+
+The project includes comprehensive security validation in CI/CD with environment separation:
+
+**File**: `.github/workflows/security-validation.yml`
+
+**Features**:
+- **Dual Environment Testing**: Both host and WASM component testing
+- **Multi-level Security Testing**: Basic, RFC 8446, advanced, and integration levels
+- **Security Report Generation**: JSON reports with security posture analysis
+- **Critical Failure Detection**: Stops deployment on critical security issues
+- **WASM Component Validation**: Tests components in actual WASM isolates
+- **Performance Regression Detection**: Benchmarks against baseline performance
+
 ```yaml
-# .github/workflows/test.yml additions needed
-- name: Test Rust/WASM Implementation  
+# Example workflow steps
+- name: Run WASM component tests (isolate environment)
   run: |
-    cd test/implementations/rust
-    cargo test --verbose
+    cd test/component-testing
+    cargo test --target wasm32-wasi-preview2 --all-features
     cargo component build --release
-    cargo test --target wasm32-wasi
 
-- name: Validate WIT Freshness
-  run: ./test/tools/check-bindings-fresh.sh
+- name: Run host-side integration tests (full system access) 
+  run: |
+    cd test/host-testing
+    cargo test --all-features --release
+    cargo run --bin host-test-runner -- \
+      --level comprehensive \
+      --output host-integration-report.json \
+      --test-components ../component-testing/target/wasm32-wasi-preview2/release/
 
-- name: Security Compliance Tests
-  run: cargo test --package security_tests
+- name: Cross-environment validation
+  run: |
+    cd test/host-testing
+    cargo run --bin host-test-runner -- \
+      --validate-wasm-components \
+      --component-path ../component-testing/target/wasm32-wasi-preview2/release/
 ```
 
-## Test Data Management
+## 🔍 Test Data and Fixtures
 
-### Certificate Fixtures
-**Location**: `test/fixtures/`
-- Valid TLS 1.3 certificates (multiple validity periods)
-- Expired certificates (for error testing)
-- Self-signed certificates (for rejection testing)  
-- Certificate chains (root, intermediate, leaf)
-- Client certificates (for mutual TLS testing)
+### Safe Test Certificates
 
-### Test Key Material
-- RSA keys (various sizes)
-- ECDSA keys (P-256, P-384)
-- Invalid/corrupted keys (for error testing)
-- **SECURITY**: All test keys MUST be clearly marked as test-only
+**Location**: `test/fixtures/public/`
 
-## Quality Assurance
+All test certificates are:
+- **Clearly Marked**: "TEST ONLY - DO NOT USE IN PRODUCTION"
+- **Short Validity**: Limited validity periods
+- **Publicly Shareable**: Safe to include in public repositories
+- **Comprehensive Coverage**: Various key types, validity periods, and security scenarios
 
-### Test Coverage Requirements
-- **100% WIT Interface Coverage**: Every function, resource, and record must be tested
-- **Error Path Coverage**: All error-code variants must have corresponding test cases  
-- **Security Edge Cases**: All security constraints must have negative tests
-- **Platform Coverage**: Tests must pass on Linux, macOS, and Windows WASI runtimes
-
-### Performance Baselines
-- Handshake completion time benchmarks
-- Stream throughput measurements  
-- Memory usage validation
-- WASM component size limits
-
-## Contributing Test Cases
-
-### Adding New Test Cases
-1. Identify the WIT interface element being tested
-2. Reference the exact line numbers in `wit/types.wit`
-3. Create both positive and negative test cases
-4. Validate test works with WASM target
-5. Update this README with test descriptions
-
-### Test Naming Convention
 ```rust
-// Format: test_{resource}_{method}_{scenario}
-#[test] fn test_client_new_valid_hostname()
-#[test] fn test_client_finish_certificate_expired()  
-#[test] fn test_connection_cipher_suite_aes128()
+// Example: Generating safe test certificates
+let (cert_der, key_der) = CertificateFixtures::generate_test_certificate(
+    TestCertificateType::Valid,
+    "test.example.com"
+)?;
 ```
+
+### Security Test Categories
+
+1. **Valid Certificates**: RSA-2048/4096, ECDSA-P256/P384
+2. **Expired Certificates**: For testing proper rejection
+3. **Self-Signed Certificates**: For validation testing
+4. **Weak Key Certificates**: For security boundary testing
+5. **Malformed Certificates**: For parser robustness testing
+
+## ⚡ Performance and Security
+
+### Security Performance Testing
+
+- **Handshake Performance**: < 100ms completion time
+- **Memory Usage**: < 10MB per connection baseline
+- **CPU Overhead**: < 5% security validation overhead
+- **Certificate Validation**: < 50ms per certificate
+
+### Security Benchmarks
+
+```bash
+# Run security performance benchmarks
+cd test/security-validation  
+cargo bench security_performance
+
+# Memory usage validation
+cargo test test_memory_usage_limits
+
+# Performance regression testing
+cargo bench --baseline security_baseline
+```
+
+## 📚 Documentation and Resources
+
+- **RFC 8446 - TLS 1.3**: [The Transport Layer Security (TLS) Protocol Version 1.3](https://tools.ietf.org/html/rfc8446)
+- **WASI Security Model**: [WebAssembly System Interface Security](https://github.com/WebAssembly/WASI/blob/main/docs/WASI-security-model.md)
+- **OWASP TLS Guidelines**: [Transport Layer Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html)
+- **Mozilla Security Guidelines**: [Server Side TLS](https://wiki.mozilla.org/Security/Server_Side_TLS)
+
+### Project Documentation
+
+- **`SECURITY-DEVELOPMENT.md`**: Comprehensive security development guidelines
+- **`/test/private/README.md`**: Private vulnerability research guidelines
+- **`/test/fixtures/README.md`**: Security guidelines for test data
+
+## 🚨 Security Incident Response
+
+### If You Discover a Vulnerability
+
+1. **DO NOT** commit vulnerability details to public repositories
+2. **DO NOT** share exploit code publicly
+3. **DO** follow responsible disclosure practices
+4. **DO** contact the WASI-TLS security team privately
+5. **DO** use the guidelines in `SECURITY-DEVELOPMENT.md`
+
+### Emergency Contacts
+
+For security incidents or vulnerability reports, see the responsible disclosure process in `SECURITY-DEVELOPMENT.md`.
+
+## 🎯 Summary
+
+The WASI-TLS testing framework provides:
+
+✅ **Public Defensive Security Testing** - Safe to share, helps improve security across implementations  
+✅ **Real-World Validation** - Uses actual certificates and cryptographic validation (no mocks)  
+✅ **RFC 8446 Compliance** - Comprehensive TLS 1.3 standard compliance testing  
+✅ **Responsible Research Guidelines** - Clear separation of public/private security tools  
+✅ **Continuous Security Integration** - Automated security validation in CI/CD  
+✅ **Emergency Response Procedures** - Clear incident response and vulnerability disclosure processes  
+
+**The goal is to improve security for everyone while being responsible about the tools and techniques we develop and share.**
 
 ---
 
-**CRITICAL**: All tests MUST validate against the current `wit/types.wit` interface. Any test using outdated or cached bindings will be rejected in CI. The WIT file is the authoritative specification - tests must follow its exact contract.
+**🔑 Remember**: All tests MUST validate against the current `wit/types.wit` interface. The WIT file is the single source of truth for all testing targets.

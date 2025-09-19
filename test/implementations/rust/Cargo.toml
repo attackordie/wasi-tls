@@ -1,0 +1,66 @@
+[package]
+name = "wasi-tls-tests"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "wasi_tls_tests"
+path = "src/lib.rs"
+
+[[bin]]
+name = "security-validator"
+path = "src/bin/security_validator.rs"
+
+[[bin]]
+name = "fuzzing-harness"
+path = "src/bin/fuzzing_harness.rs"
+
+[[bin]]
+name = "stress-tester"
+path = "src/bin/stress_tester.rs"
+
+[dependencies]
+wit-bindgen = "0.38.0"
+wasi = "0.14.0"
+anyhow = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+tokio-test = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# Security testing dependencies
+rcgen = "0.12"              # Certificate generation for testing
+rustls-pemfile = "1.0"      # PEM certificate parsing
+x509-parser = "0.15"        # Certificate validation testing
+ring = "0.17"               # Cryptographic testing utilities
+
+# CLI and reporting dependencies
+clap = { version = "4.0", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+futures = "0.3"
+tempfile = "3.0"
+
+# Fuzzing dependencies
+arbitrary = { version = "1.0", features = ["derive"], optional = true }
+libfuzzer-sys = { version = "0.4", optional = true }
+
+# Stress testing
+rand = "0.8"
+criterion = { version = "0.5", features = ["html_reports"], optional = true }
+
+[dev-dependencies]
+hex = "0.4"
+proptest = "1.0"           # Property-based testing
+
+# [[bench]]
+# name = "tls_performance"  
+# harness = false
+# Note: Benchmark file not yet implemented
+
+[features]
+default = ["security-tests"]
+security-tests = []
+fuzzing = ["arbitrary", "libfuzzer-sys"]
+stress-testing = ["criterion"]
